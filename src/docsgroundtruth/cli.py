@@ -1,0 +1,199 @@
+"""
+Command-line interface.
+
+    uv run docsgroundtruth ingest [PATH]            # index a file or folder (default: data/raw)
+    uv run docsgroundtruth search "your question"   # show the most relevant chunks
+    uv run docsgroundtruth stats                    # report card for the indexed chunks
+    uv run docsgroundtruth --help                   # list commands and options
+"""
+
+import argparse
+import io
+import logging
+import sys
+import textwrap
+from pathlib import Path
+
+from docsgroundtruth.config import Settings, get_settings
+from docsgroundtruth.domain import DocsGroundTruthError, SearchHit
+from docsgroundtruth.factory import build_embedder, build_ingestion_pipeline, open_store
+from docsgroundtruth.stats import SizeBucket, SourceStats, summarize
+
+logger = logging.getLogger(__name__)
+
+# How much of each chunk to show in search results before cutting it off with "...".
+_PREVIEW_CHARS = 300
+# Length, in characters, of the longest bar in the stats histogram.
+_BAR_WIDTH = 30
+
+
+def main(argv: list[str] | None = None) -> int:
+    """Entry point. Returns the process exit code: 0 = success, 1 = failure."""
+    settings = get_settings()
+    args = _build_parser(settings).parse_args(argv)
+    _configure_logging(settings.log_level)
+    _make_output_safe()
+
+    try:
+        # Each sub-command stored its handler function in `args.handler` (see _build_parser).
+        args.handler(args, settings)
+    except DocsGroundTruthError as error:
+        # Expected problems (Ollama down, nothing indexed yet, ...) get a clear
+        # one-line message instead of a long traceback.
+        logger.error("%s", error)
+        return 1
+    return 0
+
+
+def _build_parser(settings: Settings) -> argparse.ArgumentParser:
+    """Define the commands and their arguments."""
+    parser = argparse.ArgumentParser(
+        prog="docsgroundtruth",
+        description="Answer questions from your own documents, with citations.",
+    )
+    commands = parser.add_subparsers(dest="command", required=True)
+
+    ingest = commands.add_parser("ingest", help="Parse, chunk, embed and index documents.")
+    ingest.add_argument(
+        "path",
+        nargs="?",  # optional: falls back to the default below
+        type=Path,
+        default=settings.raw_data_dir,
+        help="File or folder to ingest (default: %(default)s).",
+    )
+    ingest.set_defaults(handler=_run_ingest)
+
+    search = commands.add_parser("search", help="Show the chunks most relevant to a question.")
+    search.add_argument("query", help="The question to search for, in quotes.")
+    search.add_argument(
+        "-k", "--top-k", type=int, default=5, help="How many results to show (default: 5)."
+    )
+    search.set_defaults(handler=_run_search)
+
+    stats = commands.add_parser("stats", help="Show chunk counts, sizes and page coverage.")
+    stats.set_defaults(handler=_run_stats)
+
+    return parser
+
+
+# --- Command handlers ------------------------------------------------------------
+
+
+def _run_ingest(args: argparse.Namespace, settings: Settings) -> None:
+    """`ingest` command: run the ingestion pipeline and print a summary."""
+    with open_store(settings) as store:
+        reports = build_ingestion_pipeline(settings, store).ingest_path(args.path)
+        total = store.count()
+
+    print("\nIngestion summary:")
+    for report in reports:
+        print(f"  {report.source}: {report.chunk_count} chunks in {report.seconds:.1f}s")
+    print(f"The index now holds {total} chunks.")
+
+
+def _run_search(args: argparse.Namespace, settings: Settings) -> None:
+    """`search` command: embed the question and print the closest chunks."""
+    query_vector = build_embedder(settings).embed_query(args.query)
+    with open_store(settings) as store:
+        hits = store.search(query_vector, top_k=args.top_k)
+
+    if not hits:
+        print("No results.")
+        return
+    for rank, hit in enumerate(hits, start=1):
+        print(_format_hit(rank, hit))
+
+
+def _run_stats(args: argparse.Namespace, settings: Settings) -> None:
+    """`stats` command: print a report card for every ingested document."""
+    with open_store(settings) as store:
+        # iter_chunks() reads lazily, page by page, so summarize() must run
+        # while the store is still open, i.e. inside this `with` block.
+        report = summarize(store.iter_chunks())
+
+    if not report:
+        print("The index is empty.")
+        return
+    for source_stats in report:
+        print(_format_source_stats(source_stats))
+    total = sum(source_stats.chunk_count for source_stats in report)
+    print(f"\nTotal: {len(report)} document(s), {total} chunks")
+
+
+# --- Output formatting -----------------------------------------------------------
+
+
+def _format_hit(rank: int, hit: SearchHit) -> str:
+    """Render one search result as a short, readable block of text."""
+    chunk = hit.chunk
+    pages = ", ".join(map(str, chunk.pages)) or "?"
+    # shorten() also collapses newlines and repeated spaces, so the preview reads as one line.
+    preview = textwrap.shorten(chunk.text, _PREVIEW_CHARS, placeholder=" ...")
+    return f"\n#{rank}  score={hit.score:.3f}  {chunk.source}  (p. {pages})\n    {preview}"
+
+
+def _format_source_stats(stats: SourceStats) -> str:
+    """Render one document's statistics as an indented block of text."""
+    lines = [
+        f"\n{stats.source}",
+        f"  Chunks:              {stats.chunk_count}",
+        f"  Chunk size (tokens): smallest {stats.min_tokens} | "
+        f"median {stats.median_tokens:.0f} | largest {stats.max_tokens}",
+        "  Size distribution (tokens: chunks):",
+        *_format_histogram(stats.size_histogram),
+    ]
+    if stats.last_page is None:
+        lines.append("  Pages:               not available for this file type")
+    else:
+        lines.append(f"  Last page with text: {stats.last_page}")
+        lines.append(f"  Pages with no text:  {_format_page_ranges(stats.pages_without_text)}")
+    return "\n".join(lines)
+
+
+def _format_histogram(buckets: tuple[SizeBucket, ...]) -> list[str]:
+    """One text bar per size range, scaled so the fullest range gets the longest bar."""
+    fullest = max(bucket.count for bucket in buckets)
+    label_width = len(f"{buckets[-1].low}-{buckets[-1].high}")  # widest label, for alignment
+
+    lines = []
+    for bucket in buckets:
+        # Every non-empty range gets at least one block, so small counts stay visible.
+        length = max(1, round(bucket.count / fullest * _BAR_WIDTH)) if bucket.count else 0
+        label = f"{bucket.low}-{bucket.high}"
+        bar = "█" * length
+        lines.append(f"    {label:>{label_width}}  {bar:<{_BAR_WIDTH}}  {bucket.count}")
+    return lines
+
+
+def _format_page_ranges(ranges: tuple[tuple[int, int], ...]) -> str:
+    """Turn page runs into text: ((1, 2), (156, 156)) -> "1-2, 156"."""
+    if not ranges:
+        return "none"
+    return ", ".join(str(first) if first == last else f"{first}-{last}" for first, last in ranges)
+
+
+# --- Setup -------------------------------------------------------------------------
+
+
+def _configure_logging(level: str) -> None:
+    """Show our own log messages at `level`, but only warnings from third-party libraries.
+
+    Docling and Hugging Face log a lot at INFO level. This keeps the output readable.
+    """
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
+        datefmt="%H:%M:%S",
+    )
+    logging.getLogger("docsgroundtruth").setLevel(level.upper())
+
+
+def _make_output_safe() -> None:
+    """Never crash because of a character the output can't display.
+
+    PDF text and the histogram's "█" bars can contain characters some outputs
+    can't encode, for example when output is redirected to a file on Windows.
+    Those characters are printed as "?" instead of raising UnicodeEncodeError.
+    """
+    if isinstance(sys.stdout, io.TextIOWrapper):
+        sys.stdout.reconfigure(errors="replace")

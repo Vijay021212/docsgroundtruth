@@ -5,49 +5,49 @@ build-backend = "hatchling.build"
 [project]
 name = "docsgroundtruth"
 version = "0.1.0"
-description = "Production-grade RAG system for healthcare documents"
+description = "Production-grade RAG system that answers questions only from your documents, with citations"
 readme = "README.md"
-requires-python = ">=3.10"
-authors = [
-    { name = "Vijay Bolle", email = "mail4vijaybolle@gmail.com" }
-]
+requires-python = ">=3.12"
+authors = [{ name = "Vijay Bolle", email = "mail4vijaybolle@gmail.com" }]
 license = { text = "MIT" }
-keywords = ["rag", "retrieval", "generation", "healthcare", "llm"]
+keywords = ["rag", "retrieval", "llm", "ollama", "qdrant", "docling", "healthcare"]
 
+# Only packages our own code imports directly. Their sub-dependencies are
+# resolved by uv and pinned in uv.lock.
 dependencies = [
-    "ollama>=0.1.0",
-    "qdrant-client>=1.7.0",
-    "docling>=1.0.0",
-    "fastapi>=0.104.0",
-    "uvicorn>=0.24.0",
-    "pydantic>=2.0.0",
-    "numpy>=1.24.0",
+    "docling>=2.139",           # PDF parsing (layout, tables, OCR) + structure-aware chunking
+    "ollama>=0.6",              # client for the local Ollama server (embeddings, later chat)
+    "qdrant-client>=1.19",      # vector database, runs embedded in our process
+    "pydantic-settings>=2.16",  # typed configuration from environment variables / .env
+    "fastapi>=0.143",           # web API (Phase 6)
+    "uvicorn>=0.54",            # server that runs the FastAPI app (Phase 6)
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.21.0",
-    "black>=23.0.0",
-    "ruff>=0.1.0",
-]
+# Makes `uv run docsgroundtruth ...` call the main() function in cli.py.
+[project.scripts]
+docsgroundtruth = "docsgroundtruth.cli:main"
 
 [project.urls]
-Repository = "https://github.com/yourusername/docsgroundtruth"
-Documentation = "https://github.com/yourusername/docsgroundtruth#readme"
+Repository = "https://github.com/<your-github-username>/docsgroundtruth"
+
+# Development-only tools. `uv sync` installs this group automatically;
+# people who just install the package don't get them.
+[dependency-groups]
+dev = [
+    "pytest>=8",  # test runner
+    "ruff>=0.6",  # linter + formatter
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/docsgroundtruth"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
-asyncio_mode = "auto"
-
-[tool.black]
-line-length = 100
-target-version = ["py312"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/docsgroundtruth"]
+[tool.ruff.lint]
+# E/F: errors and bugs, I: import order, UP: modern syntax, B: likely bugs, SIM: simplifications
+select = ["E", "F", "I", "UP", "B", "SIM"]

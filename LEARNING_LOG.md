@@ -1,121 +1,236 @@
-# DocsGroundTruth Learning Log
+# DocsGroundTruth: Learning Log
 
-A record of what was built, why, and the concepts behind it.
-
----
-
-## Phase 0: Setup & Understanding
-
-**Goal:** Install and understand the local AI stack (Ollama, embeddings, LLMs).
-
-**What we did:**
-1. **Installed Ollama** — runs open-source AI models locally without sending data to the cloud.
-2. **Downloaded two models:**
-   - `qwen3:4b-instruct` — a 4-billion-parameter chat model for generation (answering questions).
-   - `nomic-embed-text` — turns text into 768-dimensional vectors (embeddings) for semantic search.
-3. **Tested embeddings:** proved that similar meanings produce similar vectors:
-   - "How do I get approval before surgery?" vs "Prior authorization requirements" → 0.648 similarity (high)
-   - "How do I get approval before surgery?" vs "Best pizza in Chicago" → 0.324 similarity (low)
-4. **Installed uv** — a fast Python package manager that locks exact versions for reproducibility.
-
-**Key concepts learned:**
-
-### RAG = Retrieval + Generation
-- **Retrieval (R):** embed the question, find similar document chunks using embeddings, pick the top matches.
-- **Generation (G):** send the question + matched chunks to the LLM, which reads them and answers.
-- **Why it works:** the LLM only answers based on the documents you give it, not its training data, so it won't hallucinate.
-
-### Embeddings (Vectors)
-- An embedding model turns text into 768 numbers.
-- Similar texts get similar vectors (point in similar directions).
-- **Cosine similarity** (0 to 1) measures how similar two vectors are.
-- This is how RAG finds the right chunks without keyword matching.
-
-### Model Sizes
-- `qwen3:4b` = 4 billion parameters, ~2.5 GB (compressed), runs on CPU, answers in ~19 tokens/sec.
-- Smaller models are faster, good for RAG where the retrieved chunks already contain the answer.
-
-### Thinking vs Direct Answering
-- The first Qwen3 model included "reasoning" (showing its thinking before answering).
-- For RAG, we want direct answers from chunks, so we use `qwen3:4b-instruct` (no thinking).
-- Thinking is 8× slower and unnecessary when documents do the reasoning.
-
-**Why local models matter:**
-- Free (no API costs)
-- Privacy (documents stay on your laptop)
-- Works offline
-- Fully reproducible (same model, same hardware = same answers)
+A record of what we built, why we built it that way, what went wrong, and what
+we learned. One section per phase, newest last.
 
 ---
 
-## Phase 1: Project Skeleton
+## Phase 0: Local AI setup
 
-**Goal:** Set up a professional Python project structure, ready for code.
+**Goal:** install the local AI tools and understand what each one does.
 
-**What we did:**
-1. **Initialized git** to track changes.
-2. **Created `pyproject.toml`:**
-   - Project metadata (name, version, description, author)
-   - Dependencies (118 packages: ollama, qdrant-client, docling, fastapi, pydantic, numpy, torch, transformers)
-   - Build system configuration (hatchling + src/ layout)
-3. **Ran `uv sync`** to create a virtual environment (`.venv/`) with exact, locked versions.
-4. **Created folder structure:**
-   ```
-   docsgroundtruth/
-   ├── src/docsgroundtruth/    ← source code
-   ├── tests/                  ← test files
-   ├── data/raw                ← PDFs to ingest
-   ├── data/processed          ← chunks after parsing
-   ├── data/index              ← vector database
-   └── docs/                   ← documentation
-   ```
-5. **Created `.gitignore`** to exclude cache, `.venv`, data, and environment files from git.
-6. **Created `LEARNING_LOG.md`** (this file) for reflection and documentation.
+### What we did
 
-**Key concepts learned:**
+1. **Installed Ollama** (`winget install Ollama.Ollama`). It downloads open-source
+   models, runs them on the laptop, and exposes a local API at `http://localhost:11434`.
+2. **Downloaded the models:**
 
-### Build systems
-- `pyproject.toml` tells the build tool (hatchling) what to package and where code is.
-- `[project]` section defines the project.
-- `[build-system]` section defines which tool builds it.
-- `[tool.hatch.build.targets.wheel]` tells where to find the source code.
+   | Model | Role | Size |
+   |---|---|---|
+   | `qwen3:4b-instruct-2507-q4_K_M` | Chat model: writes answers (the "G" in RAG) | 2.5 GB |
+   | `nomic-embed-text` | Embedding model: turns text into 768 numbers (the "R" in RAG) | 274 MB |
+   | `qwen3:4b` | First chat model we tried; replaced (see *Problems & fixes*) | 2.5 GB |
 
-### src/ layout (modern standard)
-- Code goes in `src/projectname/`.
-- Tests go separate in `tests/`.
-- When someone `pip install docsgroundtruth`, only the code gets installed, not tests.
+3. **Measured the chat model** and **tested embeddings by hand** with PowerShell.
+4. **Installed uv** (`winget install astral-sh.uv`), the Python project and package manager.
 
-### Virtual environments
-- `.venv/` is a sandboxed Python with your dependencies, isolated from the system.
-- One `.venv` per project means projects don't interfere with each other.
+**Machine:** 24 GB RAM, AMD Ryzen AI 7 with a Radeon 860M (no NVIDIA GPU), so models run on the CPU.
 
-### Lock files
-- `uv.lock` records exact versions of all 118 packages.
-- When someone clones this repo, `uv sync` installs the exact same versions.
-- This is how we guarantee reproducibility (essential for AI work).
+### Key concepts
 
-**Design decisions:**
-- **Healthcare domain:** chose medical/policy documents for evaluation, because they have clear right/wrong answers.
-- **Project name:** `docsgroundtruth` signals "answers grounded in truth—your documents."
-- **Local models:** Qwen3 4B + Nomic Embed Text, both free and run on CPU.
+- **RAG = Retrieval + Generation.** Like an open-book exam: first find the relevant
+  pages (retrieval), then answer using only those pages (generation), with citations.
+  The model answers from *our documents*, not from its training data.
+- **Embeddings.** An embedding model turns text into a vector (768 numbers). Texts with
+  similar meaning get similar vectors, even with no words in common. **Cosine similarity**
+  measures how similar two vectors are. Our experiment:
+
+  | Compared with "How do I get approval before surgery?" | Similarity |
+  |---|---|
+  | "Prior authorization requirements for procedures" | **0.648** |
+  | "Best pizza places in Chicago" | 0.324 |
+
+- **Tokens and speed.** A token is a piece of a word (about ¾ of a word).
+  Response time ≈ load time + input tokens ÷ read speed + output tokens ÷ write speed.
+- **Parameters and quantization.** "4b" = 4 billion learned numbers. At 2 bytes each
+  that's about 8 GB; quantized to about 4 bits (`q4_K_M`) it's about 2.5 GB.
+- **Model tags.** `qwen3:4b-instruct-2507-q4_K_M` = family : size - type - release (2025-07) - quantization.
+  **Pin full tags**: a short tag like `qwen3:4b` can be re-pointed to a different model.
+- **Thinking vs instruct models.** For RAG we want direct answers:
+
+  | Model | Output tokens | Total time | Speed |
+  |---|---|---|---|
+  | `qwen3:4b` (thinking) | 934 | 64 s | 15.6 tokens/s |
+  | `qwen3:4b-instruct-2507-q4_K_M` | 73 | 7.6 s | 19.1 tokens/s |
+
+- **Why local models:** free, private (documents never leave the laptop), work offline.
+  Trade-off: smaller and slower than cloud AI models.
+
+### Problems & fixes
+
+| Problem | Cause | Fix |
+|---|---|---|
+| `ollama` not recognized right after installing | A terminal reads the PATH only when it starts | Open a new terminal (or restart VS Code) |
+| `qwen3:4b` took 64 s and leaked `</think>` text | That tag behaves as a thinking-only model; `--think=false` can't turn thinking off | Switched to `qwen3:4b-instruct-2507-q4_K_M` |
+
+---
+
+## Phase 1: Project skeleton
+
+**Goal:** a professional Python project structure, ready for code.
+
+### What we did
+
+1. `git init` to track every change.
+2. Created `pyproject.toml`: project metadata, dependencies, build settings.
+3. `uv sync`: created the virtual environment (`.venv/`) and the lock file (`uv.lock`).
+4. Created the folders: `src/docsgroundtruth/`, `tests/`, `data/raw|processed|index/`, `docs/`.
+5. Added `.gitignore`, `README.md` and this log, then made the first commit.
+
+### Key concepts
+
+- **Build system:** `pyproject.toml` tells the build tool (hatchling) what the project
+  is and where the code lives (`src/` layout: code in `src/`, tests separate).
+- **Virtual environment (`.venv/`):** a private Python installation per project, so
+  projects never break each other's packages.
+- **Lock file (`uv.lock`):** the exact version of every package. Anyone who clones the
+  repo and runs `uv sync` gets an identical setup. Our 7 direct dependencies pulled in
+  118 packages in total.
+- **`.gitignore`:** keeps `.venv/`, caches, data and PDFs out of git (and off GitHub).
+- **`.env` vs `.env.example`:** `.env` holds this machine's settings and secrets and is
+  never committed; `.env.example` is the committed template. Our variables use the `DGT_` prefix.
+
+### Problems & fixes
+
+| Problem | Cause | Fix |
+|---|---|---|
+| `unknown field python-version` in `[tool.uv]` | Not a valid uv setting | Removed it; `requires-python` sets the Python version |
+| `qdrant-client>=2.7.0` could not be found | That version doesn't exist (latest is 1.x) | Used real, installed versions |
+| `Readme file does not exist` | `pyproject.toml` referenced a missing README.md | Created README.md |
+| Hatchling: "Unable to determine which files to ship" | The `src/` layout wasn't declared | Added `[tool.hatch.build.targets.wheel] packages = ["src/docsgroundtruth"]` |
+| `head` not recognized | Unix command; PowerShell is different | `Select-Object -First N` |
+
+**Lesson:** never guess versions or config fields. Check them against the real tools. Since
+then, we read the installed libraries' source code before writing code against them.
 
 ---
 
-## Next Steps
+## Phase 2: Ingestion and vector search
 
-**Phase 2:** Ingestion — parse PDFs, split into chunks, embed and index them.
-**Phase 3:** Retrieval — hybrid search (vectors + BM25), reranking.
-**Phase 4:** Generation — LLM answers with citations.
-**Phase 5:** Evaluation — measure retrieval quality and answer accuracy.
-**Phase 6:** API & UI — FastAPI web server and simple frontend.
+**Goal:** turn the PDF into searchable chunks, and search them by meaning.
+
+### What we built
+
+```
+cli.py  (ingest / search / stats commands)
+   │
+factory.py  ◄── config.py  (settings from .env)
+   │ builds and connects everything
+   ▼
+IngestionPipeline  (pipeline.py: orchestration only)
+   │ talks only to the interfaces in domain.py
+   ├── DoclingChunker   (chunking.py)       PDF → chunks
+   ├── OllamaEmbedder   (embedding.py)      chunks → vectors
+   └── QdrantStore      (vector_store.py)   vectors → disk; search; read back
+
+stats.py    report card for the stored chunks
+timing.py   Stopwatch for per-step timings
+```
+
+```powershell
+uv run docsgroundtruth ingest          # parse → chunk → embed → store
+uv run docsgroundtruth search "..."    # find the chunks most similar to a question
+uv run docsgroundtruth stats           # chunk counts, sizes, page coverage
+uv run pytest -v                       # run the tests
+```
+
+### Key concepts
+
+1. **Parsing with layout understanding (Docling).** It finds headings, paragraphs,
+   tables, reading order and page numbers, and uses OCR for text inside images.
+   Only the main *body* is chunked: page headers, footers and page numbers are
+   skipped on purpose, because they would repeat in every chunk.
+2. **Structure-aware chunking (HybridChunker).** Split along the document's sections,
+   split anything over the limit, merge small neighbours under the same heading.
+   **The limit (800 tokens) is a maximum, not a target.**
+3. **The tokenizer must match the embedding model**, so "800 tokens" is measured with the right ruler.
+4. **Headings are embedded with each chunk** ("Prior Authorization" + sentence beats the bare sentence).
+5. **Task prefixes:** nomic-embed-text expects `search_document:` before chunks and
+   `search_query:` before questions.
+6. **Idempotent ingestion:** chunk ID = UUID made from file name + position, and a file's
+   old chunks are deleted before its new ones are stored. Re-running never creates
+   duplicates or leaves stale chunks.
+7. **Qdrant (local mode):** a *collection* holds vectors of one size; each *point* is
+   id + vector + payload (text and metadata); similarity = cosine. On disk:
+   `.lock` (folder in use), `meta.json` (collection settings), `collection/docs/storage.sqlite`
+   (the chunks). `scroll` reads all points page by page. Always close the store (it locks the folder).
+8. **Architecture:** interfaces (`Protocol`s) in `domain.py`; dependencies passed in
+   ("dependency injection"); one place that wires everything (`factory.py`); Docling
+   imported lazily so `search` stays fast.
+9. **Tests with fakes:** `FakeEmbedder` and an in-memory Qdrant replace Ollama and the disk.
+   Each test is *prepare → run → check*. 18 tests run in under a second, with no Ollama needed.
+10. **Fail loudly:** clear messages when Ollama is down, a model is missing, or nothing is
+    indexed; a warning when Docling converts only part of a file (`PARTIAL_SUCCESS`),
+    so pages are never lost silently.
+11. **Measure each step:** the log shows parse / chunk / embed / store times separately.
+
+### Results on our PDF (`AHM_250_Transcript.pdf`)
+
+| Metric | Value |
+|---|---|
+| Pages | 472, every page produced text (no gaps) |
+| Chunks | 1,007 |
+| First ingest | 471 s (about 1 page per second), including first-time model downloads |
+| Second ingest, per step | parse 433.0 s (76%) · chunk 6.3 s · embed 120.4 s (21%) · store 7.7 s · total 567.4 s |
+| Re-ingest result | Still 1,007 chunks, not 2,014: idempotency confirmed on real data |
+| Chunk size | smallest 15, median 132, largest 808 tokens |
+| Distribution | 66% of chunks ≤ 200 tokens; 7% reached the 800 limit; 2 slightly over (probably split tables that repeat their header row) |
+
+**Search experiments:**
+
+| Question | Type | Top scores | What came back |
+|---|---|---|---|
+| "Why would a health plan combine data from many sources into one database?" | Specific, in the document | 0.74 – 0.78 | Relevant: "High Volume of Data from Multiple Sources" (p. 303) |
+| "What is this document about?" | Whole-document | 0.59 – 0.65 | Loosely related chunks about documents and records |
+| "best pizza in Chicago" | Not in the document | 0.45 – 0.46 | Still 3 results, all irrelevant |
+
+### Lessons
+
+- Chunk-based RAG is **strong at specific questions, weak at whole-document questions**
+  ("what is this about?", "summarize").
+- **Vector search always returns its top matches**, even when nothing is relevant. A fixed
+  score cut-off is fragile; a reranker (Phase 3) and "not in the documents" answers (Phase 4) fix it properly.
+- **Small chunks can depend on their neighbours:** the chunk on p. 311 starts with
+  "To address these problems...", and the problems are described on p. 303.
+  So the LLM should receive several chunks, and "small-to-big" retrieval is worth trying.
+- Reference lists ("Additional Readings", "Notes") get indexed too and can show up as noise.
+- Docling dropped 4 cells from one table: **PDF parsing is never perfect, and tables are the hardest part.**
+- **Parsing dominates ingestion time** (76%, about 0.9 s per page on the CPU). Speed work
+  should start there, not with embedding or storage.
+- **Laptop timings vary between runs** (567 s vs 471 s for the same PDF). Measure more than
+  once before drawing conclusions.
+
+### Problems & fixes
+
+| Problem | Cause | Fix |
+|---|---|---|
+| `uv run pytest` → "program not found" | Ran from the home folder; uv finds the project through `pyproject.toml` in the current folder | `cd` into `docsgroundtruth` first |
+| Hugging Face "symlinks" warnings | Windows without Developer Mode | Harmless: downloads are cached as copies |
+
+### Ideas for later
+
+- Save parsed documents in `data/processed/`, so changing chunk settings doesn't mean
+  parsing the PDF again (parsing is 76% of ingestion time: 433 of 567 s).
+- "Small-to-big" retrieval: find a small chunk, then give the LLM its neighbours too.
+- A stored summary of each document, to answer overview questions.
+- Possibly skip reference-list sections during ingestion.
 
 ---
+
+## Next phases
+
+- **Phase 3, retrieval quality:** hybrid search (BM25 keywords + vectors) and a reranker.
+- **Phase 4, generation:** answers from the chat model, with citations and "not in the documents".
+- **Phase 5, evaluation:** test questions with known answers; measure retrieval and answer
+  quality; tune chunking.
+- **Phase 6, API & UI:** FastAPI service, a simple web page, README, demo, and push to GitHub.
 
 ## References
 
-- **Ollama:** https://ollama.ai
-- **Qwen3:** https://github.com/QwenLM/Qwen3
-- **Nomic Embed Text:** https://huggingface.co/nomic-ai/nomic-embed-text-v1
-- **uv:** https://github.com/astral-sh/uv
-- **Qdrant:** https://qdrant.tech
-- **Docling:** https://ds4sd.github.io/docling/
+- Ollama: https://ollama.com
+- Qwen3: https://github.com/QwenLM/Qwen3
+- nomic-embed-text v1.5: https://huggingface.co/nomic-ai/nomic-embed-text-v1.5
+- Docling: https://docling-project.github.io/docling/
+- Qdrant: https://qdrant.tech/documentation/
+- uv: https://docs.astral.sh/uv/
+- pytest: https://docs.pytest.org
