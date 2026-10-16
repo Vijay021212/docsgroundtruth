@@ -4,25 +4,26 @@ Command-line interface.
     uv run docsgroundtruth ingest [PATH]            # index a file or folder (default: data/raw)
     uv run docsgroundtruth search "your question"   # show the most relevant chunks
     uv run docsgroundtruth stats                    # report card for the indexed chunks
+    uv run docsgroundtruth ui                       # open the testing playground in your browser
     uv run docsgroundtruth --help                   # list commands and options
 """
 
 import argparse
+import contextlib
 import io
 import logging
+import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 from docsgroundtruth.config import Settings, get_settings
 from docsgroundtruth.domain import DocsGroundTruthError, SearchHit
-from docsgroundtruth.factory import build_embedder, build_ingestion_pipeline, open_store
+from docsgroundtruth.factory import build_ingestion_pipeline, build_retriever, open_store
 from docsgroundtruth.stats import SizeBucket, SourceStats, summarize
+from docsgroundtruth.ui import PLAYGROUND_SCRIPT
 
 logger = logging.getLogger(__name__)
 
-# How much of each chunk to show in search results before cutting it off with "...".
-_PREVIEW_CHARS = 300
 # Length, in characters, of the longest bar in the stats histogram.
 _BAR_WIDTH = 30
 
@@ -73,6 +74,9 @@ def _build_parser(settings: Settings) -> argparse.ArgumentParser:
     stats = commands.add_parser("stats", help="Show chunk counts, sizes and page coverage.")
     stats.set_defaults(handler=_run_stats)
 
+    ui = commands.add_parser("ui", help="Open the testing playground in your browser.")
+    ui.set_defaults(handler=_run_ui)
+
     return parser
 
 
@@ -92,16 +96,16 @@ def _run_ingest(args: argparse.Namespace, settings: Settings) -> None:
 
 
 def _run_search(args: argparse.Namespace, settings: Settings) -> None:
-    """`search` command: embed the question and print the closest chunks."""
-    query_vector = build_embedder(settings).embed_query(args.query)
+    """`search` command: retrieve the chunks closest to the question and print them."""
     with open_store(settings) as store:
-        hits = store.search(query_vector, top_k=args.top_k)
+        result = build_retriever(settings, store).retrieve(args.query, top_k=args.top_k)
 
-    if not hits:
+    if not result.hits:
         print("No results.")
         return
-    for rank, hit in enumerate(hits, start=1):
+    for rank, hit in enumerate(result.hits, start=1):
         print(_format_hit(rank, hit))
+    print(f"\n{result.summary}")
 
 
 def _run_stats(args: argparse.Namespace, settings: Settings) -> None:
@@ -120,16 +124,32 @@ def _run_stats(args: argparse.Namespace, settings: Settings) -> None:
     print(f"\nTotal: {len(report)} document(s), {total} chunks")
 
 
+def _run_ui(args: argparse.Namespace, settings: Settings) -> None:
+    """`ui` command: start the Streamlit playground. Stop it with Ctrl+C."""
+    command = [
+        # The current Python (sys.executable) guarantees the project's .venv is used.
+        sys.executable, "-m", "streamlit", "run", str(PLAYGROUND_SCRIPT),
+        # Skip Streamlit's first-run question asking for your email address.
+        "--server.showEmailPrompt=false",
+        # Don't send usage statistics to Streamlit: this is a private, local tool.
+        "--browser.gatherUsageStats=false",
+    ]
+    # Ctrl+C is the normal way to stop the playground, so exit quietly instead
+    # of printing a KeyboardInterrupt traceback.
+    with contextlib.suppress(KeyboardInterrupt):
+        subprocess.run(command, check=False)
+
+
 # --- Output formatting -----------------------------------------------------------
 
 
 def _format_hit(rank: int, hit: SearchHit) -> str:
     """Render one search result as a short, readable block of text."""
     chunk = hit.chunk
-    pages = ", ".join(map(str, chunk.pages)) or "?"
-    # shorten() also collapses newlines and repeated spaces, so the preview reads as one line.
-    preview = textwrap.shorten(chunk.text, _PREVIEW_CHARS, placeholder=" ...")
-    return f"\n#{rank}  score={hit.score:.3f}  {chunk.source}  (p. {pages})\n    {preview}"
+    return (
+        f"\n#{rank}  score={hit.score:.3f}  {chunk.source}  (p. {chunk.pages_label})\n"
+        f"    {chunk.preview()}"
+    )
 
 
 def _format_source_stats(stats: SourceStats) -> str:

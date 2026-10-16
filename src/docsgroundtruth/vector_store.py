@@ -47,9 +47,25 @@ class QdrantStore:
 
     @classmethod
     def open_local(cls, path: Path, collection: str) -> QdrantStore:
-        """Open (or create) a store saved in the folder at `path`."""
+        """Open (or create) a store saved in the folder at `path`.
+
+        Local mode lets only ONE program open the folder at a time. If another
+        program has it open (an ingest run, or the playground mid-search), we
+        explain that clearly instead of showing Qdrant's technical error.
+        """
         path.mkdir(parents=True, exist_ok=True)
-        return cls(QdrantClient(path=str(path)), collection)
+        try:
+            client = QdrantClient(path=str(path))
+        except RuntimeError as error:
+            # Qdrant reports a locked folder as a plain RuntimeError, so its
+            # message is the only way to tell this case apart from real failures.
+            if "already accessed" not in str(error):
+                raise
+            raise DocsGroundTruthError(
+                f"The index at {path} is in use by another program (an ingest run or the "
+                "playground). Wait for it to finish, then try again."
+            ) from error
+        return cls(client, collection)
 
     # --- Writing -------------------------------------------------------------
 

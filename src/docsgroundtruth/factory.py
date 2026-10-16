@@ -3,13 +3,14 @@ Composition root: the ONE place that picks concrete classes and wires them toget
 
 Every other module receives its collaborators ready-made. If we ever swap
 Ollama for another provider, this file is where that decision changes.
-The CLI uses these builders today, and the web API (Phase 6) will reuse them,
-so the wiring is never duplicated.
+The CLI and the playground use these builders today, and the web API
+(Phase 6) will reuse them, so the wiring is never duplicated.
 """
 
 from docsgroundtruth.config import Settings
 from docsgroundtruth.embedding import OllamaEmbedder
 from docsgroundtruth.pipeline import IngestionPipeline
+from docsgroundtruth.retrieval import Retriever
 from docsgroundtruth.vector_store import QdrantStore
 
 
@@ -27,6 +28,11 @@ def build_embedder(settings: Settings) -> OllamaEmbedder:
 def open_store(settings: Settings) -> QdrantStore:
     """Open the vector store. Use it in a `with` block so it's always closed."""
     return QdrantStore.open_local(settings.qdrant_path, settings.collection_name)
+
+
+def build_retriever(settings: Settings, store: QdrantStore) -> Retriever:
+    """Create the retriever on top of an already-open store."""
+    return Retriever(embedder=build_embedder(settings), store=store)
 
 
 def build_ingestion_pipeline(settings: Settings, store: QdrantStore) -> IngestionPipeline:

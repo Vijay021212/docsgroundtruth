@@ -217,13 +217,73 @@ uv run pytest -v                       # run the tests
 
 ---
 
+## Phase 2.5: Retriever and testing playground
+
+**Goal:** ask questions in a browser instead of the terminal, and prepare the code for Phase 3.
+
+### What we built
+
+```
+CLI  ──┐
+       ├──► factory.py ──► Retriever ──► embedder + vector store
+UI   ──┘                  (Phase 6: the FastAPI service joins here too)
+```
+
+- `retrieval.py`: the **Retriever**, the one place that turns a question into chunks
+  (embed the question → vector search), with timings per step. The CLI and the playground
+  both use it, and Phase 3 adds hybrid search and the reranker here.
+- `ui/playground.py`: a **Streamlit** page with a question form, result cards (score,
+  source, pages, section path, preview, full chunk on demand) and a sidebar with index info.
+- `docsgroundtruth ui` command to start it, with Streamlit's email prompt and usage statistics turned off.
+- A clear "index in use by another program" message, shared display helpers on `Chunk`
+  (`pages_label`, `preview()`), 26 tests, and the first run of the ruff code checker.
+
+### Key concepts
+
+1. **Streamlit:** a free, open-source Python library plus a command. It starts a small web
+   server on the laptop, and the page opens in the browser at `localhost:8501`. It's not a
+   website, so documents stay local. Good for internal tools, prototypes and testing; public,
+   large-scale apps use a proper frontend (e.g. React) talking to an API.
+2. **The rerun model:** Streamlit re-runs the whole script on every click. So inputs go in a
+   *form* (it only runs when "Search" is pressed), and slow work is *cached* (the sidebar
+   summary is reused for 30 s with `st.cache_data`).
+3. **One program at a time:** Qdrant's local mode locks the index folder. The playground opens
+   the index only while it searches, so `ingest` can run between searches; if the index is
+   busy, a clear message appears. Production fix: run Qdrant as a server (Phase 6).
+4. **One retrieval path for every interface:** interfaces only *display* results; the
+   Retriever does the work. No logic is duplicated.
+5. **Smoke test:** Streamlit's `AppTest` loads the page without a browser and checks that it
+   renders and explains an empty index. It checks the basics, not every detail.
+6. **Linter (ruff):** reads the code *without running it* and flags likely bugs, unused
+   imports, messy import order, outdated syntax and needless complexity (rule groups
+   F, E, I, UP, B, SIM). Ruff checks how code is *written*; pytest checks what it *does*.
+   **Run both before every commit.**
+7. **`uv add <package>`:** adds the package to `pyproject.toml`, updates `uv.lock` and installs it, in one step.
+
+### Results
+
+- The playground works: questions return the relevant chunks in the browser (retrieval only;
+  generated answers come in Phase 4).
+- 26 tests pass in about 2 s; ruff reports *All checks passed!*
+
+### Problems & fixes
+
+| Problem | Cause | Fix |
+|---|---|---|
+| ruff `E501` in `tests/conftest.py` (101 > 100 characters) | A docstring one character too long | Shortened it |
+
+---
+
 ## Next phases
 
-- **Phase 3, retrieval quality:** hybrid search (BM25 keywords + vectors) and a reranker.
-- **Phase 4, generation:** answers from the chat model, with citations and "not in the documents".
+- **Phase 3, retrieval quality:** hybrid search (BM25 keywords + vectors) and a reranker, with
+  a side-by-side comparison in the playground.
+- **Phase 4, generation:** answers from the chat model, with citations and "not in the documents",
+  shown in the playground.
 - **Phase 5, evaluation:** test questions with known answers; measure retrieval and answer
-  quality; tune chunking.
-- **Phase 6, API & UI:** FastAPI service, a simple web page, README, demo, and push to GitHub.
+  quality; save parsed documents first, then tune chunking.
+- **Phase 6, production hardening:** FastAPI service, Qdrant server mode, GitHub Actions
+  (ruff + pytest on every push), README, demo, and push to GitHub.
 
 ## References
 
@@ -234,3 +294,5 @@ uv run pytest -v                       # run the tests
 - Qdrant: https://qdrant.tech/documentation/
 - uv: https://docs.astral.sh/uv/
 - pytest: https://docs.pytest.org
+- Streamlit: https://docs.streamlit.io
+- Ruff: https://docs.astral.sh/ruff/

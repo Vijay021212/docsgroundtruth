@@ -67,3 +67,15 @@ def store() -> Iterator[QdrantStore]:
     """A fresh, empty in-memory store for each test, closed automatically afterwards."""
     with QdrantStore(QdrantClient(location=":memory:"), collection="test") as test_store:
         yield test_store
+
+
+@pytest.fixture
+def index_chunks(store: QdrantStore, embedder: FakeEmbedder) -> Callable[[list[Chunk]], None]:
+    """Factory fixture: `index_chunks(chunks)` embeds and stores chunks like the pipeline."""
+
+    def _index(chunks: list[Chunk]) -> None:
+        store.ensure_collection(embedder.dimension)
+        vectors = embedder.embed_documents([chunk.text for chunk in chunks])
+        store.replace_source(chunks[0].source, chunks, vectors)
+
+    return _index

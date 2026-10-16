@@ -17,6 +17,7 @@ It contains three kinds of things:
 
 from __future__ import annotations
 
+import textwrap
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +55,16 @@ class Chunk:
         a file writes its chunks under the same IDs instead of adding duplicates.
         """
         return str(uuid.uuid5(_CHUNK_ID_NAMESPACE, f"{self.source}#{self.index}"))
+
+    @property
+    def pages_label(self) -> str:
+        """Page numbers as display text, e.g. "308, 309" ("?" when the format has no pages)."""
+        return ", ".join(map(str, self.pages)) or "?"
+
+    def preview(self, max_chars: int = 300) -> str:
+        """The text cut to about `max_chars` characters, on one line, for result lists."""
+        # shorten() also collapses newlines and repeated spaces into single spaces.
+        return textwrap.shorten(self.text, max_chars, placeholder=" ...")
 
     def to_payload(self) -> dict[str, Any]:
         """Convert to a plain JSON-friendly dict, stored next to the vector in the database."""

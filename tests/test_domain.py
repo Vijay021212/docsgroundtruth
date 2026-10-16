@@ -27,3 +27,18 @@ def test_payload_round_trip_preserves_every_field():
     )
 
     assert Chunk.from_payload(chunk.to_payload()) == chunk
+
+
+def test_pages_label_lists_the_pages_or_a_question_mark():
+    assert Chunk(source="a.pdf", index=0, text="x", pages=(308, 309)).pages_label == "308, 309"
+    assert Chunk(source="notes.md", index=0, text="x").pages_label == "?"
+
+
+def test_preview_is_a_single_short_line():
+    chunk = Chunk(source="a.pdf", index=0, text="Claims\n\nA claim is a request for payment. " * 20)
+
+    preview = chunk.preview(max_chars=60)
+
+    assert "\n" not in preview
+    assert len(preview) <= 60
+    assert preview.endswith(" ...")

@@ -21,6 +21,7 @@ dependencies = [
     "pydantic-settings>=2.16",  # typed configuration from environment variables / .env
     "fastapi>=0.143",           # web API (Phase 6)
     "uvicorn>=0.54",            # server that runs the FastAPI app (Phase 6)
+    "streamlit>=1.66.0",        # web UI for the testing playground
 ]
 
 # Makes `uv run docsgroundtruth ...` call the main() function in cli.py.
