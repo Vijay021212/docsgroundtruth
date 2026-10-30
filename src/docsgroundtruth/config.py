@@ -53,7 +53,9 @@ class Settings(BaseSettings):
     embed_batch_size: int = 16
 
     # --- Chunking ----------------------------------------------------------------
-    chunk_max_tokens: int = 800
+    # 400 scored better than 800 in our evaluation: chunks mix fewer topics, the right page
+    # ranks higher, and answers are written faster because the model has less to read.
+    chunk_max_tokens: int = 400
 
     # Tokenizer used to COUNT tokens while chunking. It must match the embedding
     # model, otherwise "800 tokens" would be measured with the wrong ruler.
@@ -89,8 +91,8 @@ class Settings(BaseSettings):
     answer_chunks: int = 5
 
     # How many tokens the chat model can see at once. Ollama silently cuts off anything
-    # beyond this. 5 chunks of about 800 tokens + instructions + answer fit within 8192,
-    # so raise this if you raise answer_chunks.
+    # beyond this. 5 chunks of about 400 tokens + instructions + answer fit well within 8192,
+    # so raise this only if you raise answer_chunks or chunk_max_tokens a lot.
     chat_context_tokens: int = 8192
 
     # Upper limit on the length of an answer, in tokens.
@@ -107,6 +109,7 @@ class Settings(BaseSettings):
 
     # --- Storage -------------------------------------------------------------------
     raw_data_dir: Path = Path("data/raw")
+    parsed_docs_dir: Path = Path("data/processed")
     qdrant_path: Path = Path("data/index")
     collection_name: str = "docs"
 

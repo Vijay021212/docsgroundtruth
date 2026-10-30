@@ -1,0 +1,101 @@
+# Harder test paper for AHM_250_Transcript.pdf. The format is the same as ahm250_questions.yaml.
+#
+# It's separate so the first paper's scores stay comparable with the baseline. Written after the
+# first run showed that paper was too easy, with these three kinds of question:
+#
+# h01-h06   everyday wording, far from the words the PDF uses
+# h07-h12   comparisons, which usually need more than one section
+# h13-h17   sound answerable, because they use the PDF's terms, but the PDF doesn't answer them
+
+questions:
+  - id: h01
+    type: in_document
+    question: A doctor charges for an office visit after only a quick phone chat. What is this billing scheme called?
+    pages: [218]
+    must_include: [upcoding]
+
+  - id: h02
+    type: in_document
+    question: How long can a widow keep the health coverage she had through her late husband's job?
+    pages: [366]
+    must_include: ["36"]
+
+  - id: h03
+    type: in_document
+    question: Under per-person payment, who carries the financial risk if patients need more care than expected?
+    pages: [34, 35, 36]
+    must_include: [provider]
+
+  - id: h04
+    type: in_document
+    question: Can someone with a long-term illness use a specialist as their main doctor?
+    pages: [219]
+    must_include: [specialist]
+
+  - id: h05
+    type: in_document
+    question: Can a person with Medicare Advantage also buy a Medigap policy?
+    pages: [432]
+    must_include: ["not"]
+
+  - id: h06
+    type: in_document
+    question: How many years of a group's claims history does a plan usually use to set its rates?
+    pages: [289]
+    must_include: [two]
+
+  - id: h07
+    type: in_document
+    question: What is the difference between a HIN and health information exchange?
+    pages: [313, 315]
+    must_include: [providers, region]
+
+  - id: h08
+    type: in_document
+    question: How do community rating and experience rating differ?
+    pages: [287, 289]
+    must_include: [community, group]
+
+  - id: h09
+    type: in_document
+    question: How does a PPO differ from a traditional HMO when a member sees a provider outside the network?
+    pages: [3]
+    must_include: [non-network]
+
+  - id: h10
+    type: in_document
+    question: How does the way a provider is paid differ between fee-for-service and capitation?
+    pages: [34, 35]
+    must_include: [services, per]
+
+  - id: h11
+    type: in_document
+    question: How does the minimum medical loss ratio differ between individual plans and large group plans?
+    pages: [388]
+    must_include: ["80", "85"]
+
+  - id: h12
+    type: in_document
+    question: How does the length of COBRA coverage differ after losing a job compared with after a divorce?
+    pages: [366]
+    must_include: ["18", "36"]
+
+  - id: h13
+    type: not_in_document
+    question: What is the reimbursement rate for CPT code 99213?
+
+  - id: h14
+    type: not_in_document
+    question: Does Medicare cover GLP-1 weight loss drugs?
+
+  - id: h15
+    type: not_in_document
+    question: Who is the current chief executive of Kaiser Permanente?
+
+  - id: h16
+    type: not_in_document
+    question: What is the copayment for an HMO visit at Blue Cross of Texas?
+
+  - id: h17
+    type: not_in_document
+    question: How are health plans regulated in Canada?

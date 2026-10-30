@@ -122,6 +122,7 @@ def build_ingestion_pipeline(settings: Settings, store: QdrantStore) -> Ingestio
     chunker = DoclingChunker(
         tokenizer_model=settings.tokenizer_model,
         max_tokens=settings.chunk_max_tokens,
+        cache_dir=settings.parsed_docs_dir,
         enable_ocr=settings.enable_ocr,
     )
     return IngestionPipeline(

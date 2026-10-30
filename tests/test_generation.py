@@ -108,6 +108,19 @@ def test_the_model_saying_the_answer_is_missing_is_recognised():
     assert answer.warnings == ()  # no "missing citations" warning for a refusal
 
 
+def test_a_refusal_with_slightly_different_wording_is_recognised():
+    answer = _answer("The documents do not contain an answer to this question.", 0.9)
+
+    assert not answer.found
+
+
+def test_a_refusal_sentence_after_a_real_answer_is_removed():
+    answer = _answer(f"X is a plan [1]. {NOT_IN_DOCUMENTS}", 0.9)
+
+    assert answer.found
+    assert answer.text == "X is a plan [1]."
+
+
 def test_an_empty_reply_gives_a_clear_error():
     with pytest.raises(DocsGroundTruthError, match="empty answer"):
         _answer("", 0.9)

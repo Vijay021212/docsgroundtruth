@@ -453,8 +453,9 @@ Finding the chunks added 3–4 s per question, about 2 s of it embedding the que
 | Refused: healthcare not in the PDF / off-topic | 5/5 / 5/5 |
 | Typical time to write an answer | 11.4 s |
 
-Reading the 20 answers against their sources (not by a domain expert): 16 match their sources.
-The other 4: q15 (HIN) is wrong, q03 was wrongly refused, and q04 and q17 add small unsupported claims.
+Reading the 20 answers against their sources (not by a domain expert): 17 match their sources. q15 (HIN)
+is wrong, q03 was wrongly refused, and q17 adds a small unsupported claim. (This first said q04
+was also unsupported, but page 16's worked example supports it.)
 
 ### Lessons
 
@@ -465,12 +466,63 @@ The other 4: q15 (HIN) is wrong, q03 was wrongly refused, and q04 and q17 add sm
 - **A test paper written from the pages it tests is easy:** the 100% search score flatters the system.
 - **Some chunks mix unrelated topics:** the COBRA chunk also contains the HMO Act and HIPAA.
 
+### Improvements, measured one at a time
+
+**What changed:**
+
+1. **A harder test paper** (`eval/ahm250_hard_questions.yaml`, 17 questions): everyday wording,
+   comparisons, and near-miss questions. Kept separate so the first paper stays comparable.
+2. **A stricter prompt:** cite every sentence, don't add anything, don't confuse similar terms.
+3. **Chunks of at most 400 tokens instead of 800.** Only these two sizes were tested.
+4. **Saved parses** (`data/processed/`), so trying a new chunk size skips the slow PDF reading.
+5. **Better refusal handling:** remove a stray refusal after a real answer, and recognise "do not".
+
+**Before and after** (hybrid + reranker):
+
+| Check | Paper 1 before | Paper 1 after | Paper 2 before | Paper 2 after |
+|---|---|---|---|---|
+| Expected page in the top 5 | 20/20 | 20/20 | 11/12 | 11/12 |
+| MRR | 0.93 | 0.95 | 0.83 | 0.83 |
+| Answered when it should | 19/20 | 19/20 | 11/12 | 11/12 |
+| Contains the key words | 19/20 | 19/20 | 11/12 | 10/12 |
+| Cites an expected page | 17/20 | 19/20 | 9/12 | 10/12 |
+| Sentences with a citation | 54% | 70% | 87% | 89% |
+| Refused when it should | 10/10 | 10/10 | 5/5 | 5/5 |
+| Typical time to write an answer | 11.4 s | 9.2 s | 15.4 s | 9.8 s |
+
+The key-word drop on paper 2 is h04, which was wrong both times: its longer wrong answer happened
+to contain the key word. On paper 2, MRR by mode after the changes: vector 0.61, keyword 0.61,
+hybrid 0.60, hybrid + reranker 0.83.
+
+**Still not fixed** (from reading the answers against their sources, not by a domain expert):
+
+- q15: still describes HIE as if it were a HIN.
+- h04: still wrongly answers "No". The text is filed under the wrong heading ("Unbundling"), its
+  words differ from the question's, and search ranks it only #23.
+- q03 and h07: still wrongly refused.
+- h09 now has a garbled claim about "richer" benefits, and h08 is muddled in places. q06 applies
+  a staff-model detail to closed-panel HMOs. Correctness did not clearly improve overall.
+
+### More lessons
+
+- **Read the answers, not just the scores:** one prompt experiment raised citations to 95% and
+  "answered" to 20/20, but it was worse. A runaway repetitive answer inflated the first number, and
+  a bug in the refusal check inflated the second. That change was rolled back.
+- **The easy paper hid the reranker's value:** on hard questions, it scored MRR 0.83 against 0.61.
+- **Don't use a higher score cut-off:** real questions scored as low as 0.03, while the unanswered
+  Canada question scored 0.93. Only the model's own refusal caught that one.
+- **Check your own criticism against the source:** q04 looked unsupported, but it wasn't.
+
+### Ideas for later
+
+- Try a bigger chat model, which may help with q15 and h07 but will be slower.
+- Try other chunk sizes, and fix wrong headings from PDF parsing.
+- Add a public test paper based on free documents, so anyone can reproduce the scores.
+
 ---
 
 ## Next phases
 
-- **Phase 5, evaluation:** test questions with known answers; measure retrieval and answer
-  quality; save parsed documents first, then tune chunking.
 - **Phase 6, production hardening:** FastAPI service, Qdrant server mode, GitHub Actions
   (ruff + pytest on every push), README, demo, and push to GitHub.
 

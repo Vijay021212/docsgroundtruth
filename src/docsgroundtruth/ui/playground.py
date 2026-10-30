@@ -146,6 +146,7 @@ def _answer_and_render(question: str) -> None:
         st.error(str(error))
         return
 
+    placeholder.text(answer.text)  # the final, cleaned-up text replaces what was streamed
     for warning in answer.warnings:
         st.warning(warning)
     st.caption(f"{retrieval.summary}. Answer written in {answer.seconds:.1f}s.")

@@ -26,9 +26,10 @@ from docling.datamodel.base_models import ConversionStatus, InputFormat
 from docling.datamodel.pipeline_options import PdfPipelineOptions
 from docling.document_converter import DocumentConverter, PdfFormatOption
 from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
-from docling_core.types.doc import DoclingDocument
+from docling_core.types.doc import DoclingDocument, ImageRefMode
 
 from docsgroundtruth.domain import Chunk
+from docsgroundtruth.parse_cache import parsed_document_path
 from docsgroundtruth.timing import Stopwatch
 
 logger = logging.getLogger(__name__)
@@ -40,13 +41,17 @@ class DoclingChunker:
     # Formats Docling can parse that make sense as knowledge sources.
     supported_suffixes = frozenset({".pdf", ".docx", ".pptx", ".html", ".md"})
 
-    def __init__(self, tokenizer_model: str, max_tokens: int, enable_ocr: bool = True) -> None:
+    def __init__(
+        self, tokenizer_model: str, max_tokens: int, cache_dir: Path, enable_ocr: bool = True
+    ) -> None:
         """
         Args:
             tokenizer_model: Hugging Face tokenizer used to measure chunk sizes.
             max_tokens: Upper limit on the size of one chunk, in tokens.
+            cache_dir: Folder where parsed documents are saved and reused.
             enable_ocr: Read text from scanned pages and images (slow on CPU).
         """
+        self._cache_dir = cache_dir
         self._enable_ocr = enable_ocr
 
         # The converter does the parsing. Only the PDF pipeline is customised
@@ -80,7 +85,12 @@ class DoclingChunker:
         return chunks
 
     def _parse(self, path: Path) -> DoclingDocument:
-        """Run Docling's layout analysis on the file (the slow step)."""
+        """Run Docling's layout analysis on the file (the slow step), or reuse a saved result."""
+        saved = parsed_document_path(self._cache_dir, path, self._enable_ocr)
+        if saved.exists():
+            logger.info("Using the saved parse of %s", path.name)
+            return DoclingDocument.load_from_json(saved)
+
         logger.info("Parsing %s (OCR %s)...", path.name, "on" if self._enable_ocr else "off")
         result = self._converter.convert(path)
 
@@ -94,6 +104,10 @@ class DoclingChunker:
                 path.name,
                 details,
             )
+        else:
+            # Only complete results are saved, so failed pages get another try next time.
+            self._cache_dir.mkdir(parents=True, exist_ok=True)
+            result.document.save_as_json(saved, image_mode=ImageRefMode.PLACEHOLDER)
         return result.document
 
     def _to_chunk(self, doc_chunk: DocChunk, source: str, index: int) -> Chunk:
