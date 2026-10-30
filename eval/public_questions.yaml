@@ -1,0 +1,103 @@
+# Public test paper, so anyone can reproduce the scores. The format is the same as
+# ahm250_questions.yaml. It is based on a free U.S. government booklet:
+#
+#   "Understanding Medicare Advantage Plans", CMS Product No. 12026, April 2026
+#   https://www.medicare.gov/publications/12026-understanding-medicare-advantage-plans.pdf
+#   SHA-256 of the copy used: a5462d0f92c5b25e460672ebc95c82811f593bb3268d45736fc74a2bb3ad8232
+#
+# `pages` are PDF page numbers, not the numbers printed in the booklet. If CMS publishes
+# a new edition, the pages and answers here may no longer match.
+
+questions:
+  - id: p01
+    type: in_document
+    question: When is the Medicare Open Enrollment Period each year?
+    pages: [9, 13]
+    must_include: [October 15, December 7]
+
+  - id: p02
+    type: in_document
+    question: Is it legal to sell me a Medigap policy while I'm in a Medicare Advantage Plan?
+    pages: [7]
+    must_include: [illegal]
+
+  - id: p03
+    type: in_document
+    question: How is a copayment different from coinsurance?
+    pages: [11]
+    must_include: [fixed, percentage]
+
+  - id: p04
+    type: in_document
+    question: Can I put my own money into a Medicare Medical Savings Account?
+    pages: [21]
+    must_include: [deposit]
+
+  - id: p05
+    type: in_document
+    question: How much extra can a provider charge under balance billing in a PFFS Plan?
+    pages: [18]
+    must_include: ["15%"]
+
+  - id: p06
+    type: in_document
+    question: What do I need to qualify for a Medicare Advantage Plan?
+    pages: [12]
+    must_include: [Part A, Part B, service area]
+
+  - id: p07
+    type: in_document
+    question: What are the three types of Special Needs Plans?
+    pages: [19, 20]
+    must_include: [chronic, institutional, dual]
+
+  - id: p08
+    type: in_document
+    question: I tried Medicare Advantage for the first time and don't like it. How long do I have to go back and still buy supplemental insurance?
+    pages: [7]
+    must_include: ["12 months"]
+
+  - id: p09
+    type: in_document
+    question: What should I do with my red, white, and blue card after joining a Medicare Advantage Plan?
+    pages: [9]
+    must_include: [safe]
+
+  - id: p10
+    type: in_document
+    question: How do HMO and PPO plans differ on using doctors outside the network?
+    pages: [17, 24]
+    must_include: [HMO, PPO]
+
+  - id: p11
+    type: in_document
+    question: Does Original Medicare pay for medical care when I travel abroad?
+    pages: [6]
+    must_include: [outside]
+
+  - id: p12
+    type: in_document
+    question: Do Special Needs Plans include drug coverage?
+    pages: [20, 23]
+    must_include: [Part D]
+
+  # The booklet sends readers to a website for this amount and never states it.
+  - id: r01
+    type: not_in_document
+    question: What is the dollar amount of this year's standard Part B premium?
+
+  - id: r02
+    type: not_in_document
+    question: Which Medicare Advantage Plans in Ohio have a 5-star rating?
+
+  - id: r03
+    type: not_in_document
+    question: What is capitation?
+
+  - id: r04
+    type: off_topic
+    question: Where is the best pizza in Chicago?
+
+  - id: r05
+    type: off_topic
+    question: What is the capital of France?

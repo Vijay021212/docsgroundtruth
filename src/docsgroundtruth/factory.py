@@ -6,24 +6,29 @@ Ollama or fastembed for another provider, this file is where that decision
 changes. The CLI and the playground use these builders today, and the web API
 (Phase 6) will reuse them, so the wiring is never duplicated.
 
-Docling and fastembed are imported inside the builders that need them, not at
-the top of this file: they take seconds to import, and commands like `stats`
+Docling, fastembed and FastAPI are imported inside the builders that need them,
+not at the top of this file: they take time to import, and commands like `stats`
 never use them.
 """
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from docsgroundtruth.chat import OllamaChatModel
 from docsgroundtruth.config import Settings
-from docsgroundtruth.domain import Embedder, Reranker, SparseEncoder
+from docsgroundtruth.domain import Embedder, Reranker, SearchMode, SparseEncoder
 from docsgroundtruth.embedding import OllamaEmbedder
 from docsgroundtruth.evaluation import Evaluator
 from docsgroundtruth.generation import AnswerGenerator
 from docsgroundtruth.pipeline import IngestionPipeline
-from docsgroundtruth.retrieval import Retriever
+from docsgroundtruth.retrieval import RetrievalResult, Retriever
 from docsgroundtruth.vector_store import QdrantStore
+
+if TYPE_CHECKING:  # only for the type hint: commands other than `api` don't need FastAPI
+    from fastapi import FastAPI
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +118,24 @@ def build_evaluator(settings: Settings, store: QdrantStore) -> Evaluator:
         generator=build_answer_generator(settings),
         top_k=settings.answer_chunks,
     )
+
+
+def build_api_app(settings: Settings) -> FastAPI:
+    """Create the web API, with its search models built once and reused for every request."""
+    from docsgroundtruth.api import create_app
+
+    models = build_search_models(settings)
+    generator = build_answer_generator(settings)
+    # Qdrant's local mode allows one open connection at a time, so requests take turns
+    # searching. The slow answer writing happens outside the lock, so it doesn't block them.
+    index_lock = threading.Lock()
+
+    def retrieve(question: str, top_k: int, mode: SearchMode) -> RetrievalResult:
+        with index_lock, open_store(settings) as store:
+            retriever = build_retriever(settings, store, models)
+            return retriever.retrieve(question, top_k=top_k, mode=mode)
+
+    return create_app(retrieve, generator.answer, settings.answer_chunks)
 
 
 def build_ingestion_pipeline(settings: Settings, store: QdrantStore) -> IngestionPipeline:

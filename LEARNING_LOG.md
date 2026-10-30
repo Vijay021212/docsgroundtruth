@@ -517,14 +517,56 @@ hybrid 0.60, hybrid + reranker 0.83.
 
 - Try a bigger chat model, which may help with q15 and h07 but will be slower.
 - Try other chunk sizes, and fix wrong headings from PDF parsing.
-- Add a public test paper based on free documents, so anyone can reproduce the scores.
+
+### Public test paper
+
+`eval/public_questions.yaml` has 17 questions on a free CMS booklet ("Understanding Medicare
+Advantage Plans", April 2026), so anyone can reproduce the scores. It uses its own index folder.
+
+| Check | Score |
+|---|---|
+| Expected page in the top 5 | 12/12 |
+| MRR: vector / keyword / hybrid / hybrid + reranker | 0.96 / 0.92 / 0.88 / 0.96 |
+| Answered / contains key words | 12/12 / 12/12 |
+| Cites an expected page | 11/12 |
+| Sentences with a citation | 14/21 (67%) |
+| Refused when it should | 5/5 |
+
+Reading all the answers against the booklet, they're right, though p09 probably cites the
+wrong page. This booklet is short and plainly written, so it's easier than the course PDF.
+
+---
+
+## Phase 6: Production readiness
+
+**Goal:** make the project ready for other people to read, run and trust.
+
+### What we built
+
+- `api.py` and `docsgroundtruth api`: a FastAPI service with `/health`, `/search` and `/ask`. It only
+  accepts connections from this computer, because it has no login. Tested with fakes, and once
+  end to end against the real models.
+- `.github/workflows/ci.yml`: GitHub runs ruff and pytest on every push.
+- `README.md`: rewritten with the architecture, scores, known failures and how to reproduce them.
+- `LICENSE` (MIT), and `.gitattributes` for one line-ending style.
+
+### Key concepts
+
+1. **HTTP status codes:** 200 = worked, 422 = bad request, 503 = temporary problem such as Ollama down.
+2. **Continuous integration (CI):** a clean machine runs the checks on every push, catching anything
+   that only works on your laptop.
+3. **Honest documentation:** showing what doesn't work makes the scores believable.
+
+### Known issue
+
+The playground can get stuck on "Stopping..." after Ctrl+C. Not investigated. Closing the terminal stops it.
 
 ---
 
 ## Next phases
 
-- **Phase 6, production hardening:** FastAPI service, Qdrant server mode, GitHub Actions
-  (ruff + pytest on every push), README, demo, and push to GitHub.
+- **Push to GitHub:** the last step, once the user gives the go.
+- **Later, if wanted:** Qdrant server mode, a bigger chat model, and a demo GIF for the README.
 
 ## References
 

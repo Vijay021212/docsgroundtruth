@@ -8,6 +8,7 @@ Command-line interface.
     uv run docsgroundtruth stats                    # report card for the indexed chunks
     uv run docsgroundtruth evaluate                 # run the test paper and report the scores
     uv run docsgroundtruth ui                       # open the testing playground in your browser
+    uv run docsgroundtruth api                      # start the web API on this computer
     uv run docsgroundtruth --help                   # list commands and options
 """
 
@@ -30,6 +31,7 @@ from docsgroundtruth.evaluation_report import (
 )
 from docsgroundtruth.factory import (
     build_answer_generator,
+    build_api_app,
     build_evaluator,
     build_ingestion_pipeline,
     build_retriever,
@@ -114,6 +116,9 @@ def _build_parser(settings: Settings) -> argparse.ArgumentParser:
 
     ui = commands.add_parser("ui", help="Open the testing playground in your browser.")
     ui.set_defaults(handler=_run_ui)
+
+    api = commands.add_parser("api", help="Start the web API on this computer.")
+    api.set_defaults(handler=_run_api)
 
     return parser
 
@@ -224,6 +229,13 @@ def _run_ui(args: argparse.Namespace, settings: Settings) -> None:
     # of printing a KeyboardInterrupt traceback.
     with contextlib.suppress(KeyboardInterrupt):
         subprocess.run(command, check=False)
+
+
+def _run_api(args: argparse.Namespace, settings: Settings) -> None:
+    """`api` command: start the web API. Stop it with Ctrl+C."""
+    import uvicorn  # imported here because only this command needs it
+
+    uvicorn.run(build_api_app(settings), host=settings.api_host, port=settings.api_port)
 
 
 # --- Output formatting -----------------------------------------------------------

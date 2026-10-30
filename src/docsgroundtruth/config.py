@@ -107,6 +107,12 @@ class Settings(BaseSettings):
     eval_questions: Path = Path("eval/ahm250_questions.yaml")
     eval_results_dir: Path = Path("eval/results")
 
+    # --- Web API -------------------------------------------------------------------
+    # 127.0.0.1 means only this computer can connect. The API has no login, so add
+    # real authentication before changing this to a network address.
+    api_host: str = "127.0.0.1"
+    api_port: int = 8000
+
     # --- Storage -------------------------------------------------------------------
     raw_data_dir: Path = Path("data/raw")
     parsed_docs_dir: Path = Path("data/processed")

@@ -1,0 +1,2 @@
+# Store text files with one line-ending style, whatever computer they're edited on.
+* text=auto eol=lf
