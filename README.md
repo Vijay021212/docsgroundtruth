@@ -74,7 +74,7 @@ Key words can't prove an answer is true, so the answers were also read against t
 - **Weaker details:** a few answers on the hard paper are muddled or add a nearby detail.
 - **Citations:** only 67–70% of sentences have one on the two easier papers, and citations sometimes point to the wrong chunk.
 
-The test papers are small (29 questions on the course PDF and 17 on the booklet), and they were written after reading the documents, so they probably flatter the system. The [learning log](LEARNING_LOG.md) has the full history, including a change that raised the scores but made the answers worse.
+The test papers are small (47 questions on the course PDF and 17 on the booklet), and they were written after reading the documents, so they probably flatter the system. The [learning log](LEARNING_LOG.md) has the full history, including a change that raised the scores but made the answers worse.
 
 ## Quick start
 
