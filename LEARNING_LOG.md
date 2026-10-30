@@ -388,7 +388,7 @@ question → retriever (hybrid + reranker) → best 5 chunks → chat model → 
 
 | Question | Result | Writing time |
 |---|---|---|
-| "What is a HIN?" | Answer citing p. 315 (not yet checked against the PDF) | 17.4 s |
+| "What is a HIN?" | Answer citing p. 315. **Later review found it wrong:** it describes HIE as if it were a HIN (see Phase 5) | 17.4 s |
 | "Why would a health plan combine data from many sources into one database?" | Answer citing pp. 311–312; a person compared it with the source and it matched | 19.4 s |
 | "best pizza in Chicago" | "The documents don't contain an answer to this question." The model never ran. | 0.0 s |
 
@@ -418,6 +418,52 @@ Finding the chunks added 3–4 s per question, about 2 s of it embedding the que
 - Improve answers that use only one source and cite too rarely, then measure the effect.
 - Test a question on a healthcare topic the PDF doesn't cover, where the reranker may not score
   near 0 and the model itself has to refuse.
+
+---
+
+## Phase 5: Evaluation
+
+**Goal:** replace "it looks good" with numbers, so we can tell whether a change really helps.
+
+### What we built
+
+- `eval/ahm250_questions.yaml`: a test paper of 30 questions: 20 answerable from the PDF, 5 healthcare
+  questions it can't answer, and 5 off-topic. Each expected answer was checked against the PDF's text.
+- `evaluation.py` and `evaluation_report.py`: run every question through the real system,
+  calculate the scores, and save a review sheet for a person (`eval/results/`, ignored by git).
+- `docsgroundtruth evaluate`: the command that runs it all.
+
+### Key concepts
+
+1. **Mean reciprocal rank (MRR):** how high the right page ranks. 1 means always first, 0.5 means always second.
+2. **What code can and can't score:** code can check pages, refusals and citations, but not
+   whether an answer is true to its source. That still needs a person.
+3. **Baseline:** a saved score to compare every later change against.
+
+### Baseline results (first run)
+
+| Check | Score |
+|---|---|
+| Expected page in the top 5: all four search modes | 20/20 |
+| MRR: vector / keyword / hybrid / hybrid + reranker | 0.85 / 0.89 / 0.97 / 0.93 |
+| Answered when it should | 19/20 |
+| Contains the key words | 19/20 |
+| Cites an expected page | 17/20 |
+| Sentences with a citation | 19/35 (54%) |
+| Refused: healthcare not in the PDF / off-topic | 5/5 / 5/5 |
+| Typical time to write an answer | 11.4 s |
+
+Reading the 20 answers against their sources (not by a domain expert): 16 match their sources.
+The other 4: q15 (HIN) is wrong, q03 was wrongly refused, and q04 and q17 add small unsupported claims.
+
+### Lessons
+
+- **Key-word checks aren't enough:** the wrong HIN answer passed its key-word check.
+- **Three questions weren't enough:** the Phase 3 result that the reranker ranks best didn't hold
+  across 20 questions, where hybrid ranked slightly better. The reranker is still useful for
+  refusals: refusal questions scored 0.074 or below, and real questions 0.576 or above.
+- **A test paper written from the pages it tests is easy:** the 100% search score flatters the system.
+- **Some chunks mix unrelated topics:** the COBRA chunk also contains the HMO Act and HIPAA.
 
 ---
 

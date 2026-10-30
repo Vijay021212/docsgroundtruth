@@ -38,7 +38,7 @@ Rules:
 - Be concise."""
 
 # Matches citations such as [1] and [1, 2], capturing the numbers inside the brackets.
-_CITATION = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
+CITATION = re.compile(r"\[(\d+(?:\s*,\s*\d+)*)\]")
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,7 +140,7 @@ class AnswerGenerator:
     def _checked_answer(text: str, hits: tuple[SearchHit, ...], seconds: float) -> Answer:
         """Compare the citations in the text with the sources that were actually sent."""
         cited = sorted(
-            {int(number) for match in _CITATION.findall(text) for number in match.split(",")}
+            {int(number) for match in CITATION.findall(text) for number in match.split(",")}
         )
         # Source numbers start at 1, so source N is hits[N - 1].
         valid = tuple(

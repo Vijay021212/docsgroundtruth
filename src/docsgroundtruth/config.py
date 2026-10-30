@@ -101,6 +101,10 @@ class Settings(BaseSettings):
     # off-topic question scored 0.000 and real ones above 0.9. Phase 5 tests it properly.
     min_relevance: float = 0.01
 
+    # --- Evaluation ------------------------------------------------------------------
+    eval_questions: Path = Path("eval/ahm250_questions.yaml")
+    eval_results_dir: Path = Path("eval/results")
+
     # --- Storage -------------------------------------------------------------------
     raw_data_dir: Path = Path("data/raw")
     qdrant_path: Path = Path("data/index")

@@ -1,0 +1,173 @@
+# Test paper for AHM_250_Transcript.pdf.
+#
+# in_document:      the answer is in the PDF. `pages` lists where (PDF page numbers),
+#                   and `must_include` lists words a correct answer should contain.
+# not_in_document:  a healthcare question the PDF doesn't answer. The system should refuse.
+#                   These are the hardest: the topic is close, so search scores may be high.
+# off_topic:        nothing to do with the PDF. The system should refuse.
+#
+# Some questions deliberately use different words from the PDF, to test search by meaning.
+
+questions:
+  # --- The answer is in the PDF ----------------------------------------------------
+  - id: q01
+    type: in_document
+    question: What is managed care?
+    pages: [1]
+    must_include: [delivery, financing]
+
+  - id: q02
+    type: in_document
+    question: Under the HMO Act of 1973, which employers had to offer a federally qualified HMO?
+    pages: [2]
+    must_include: ["25"]
+
+  - id: q03
+    type: in_document
+    question: Why do people in poor health sign up for insurance more often than healthy people?
+    pages: [13]
+    must_include: [adverse selection]
+
+  - id: q04
+    type: in_document
+    question: How does insurance avoid paying twice when someone is covered by two policies?
+    pages: [16]
+    must_include: [primary, secondary]
+
+  - id: q05
+    type: in_document
+    question: What is one criticism of capitation?
+    pages: [35]
+    must_include: [withhold]
+
+  - id: q06
+    type: in_document
+    question: Who provides care to members in a closed-panel HMO?
+    pages: [64]
+    must_include: [employees]
+
+  - id: q07
+    type: in_document
+    question: What are the four main HMO models?
+    pages: [66]
+    must_include: [staff, group, network]
+
+  - id: q08
+    type: in_document
+    question: What principles is a patient-centered medical home based on?
+    pages: [75]
+    must_include: [access, coordination]
+
+  - id: q09
+    type: in_document
+    question: What is a drug formulary?
+    pages: [110]
+    must_include: [drugs]
+
+  - id: q10
+    type: in_document
+    question: What are the five steps of the case management process?
+    pages: [202]
+    must_include: [assessment, monitoring, evaluation]
+
+  - id: q11
+    type: in_document
+    question: When can utilization review be carried out?
+    pages: [211]
+    must_include: [prospective, concurrent, retrospective]
+
+  - id: q12
+    type: in_document
+    question: What is it called when a provider bills separately for services that belong together?
+    pages: [218]
+    must_include: [unbundling]
+
+  - id: q13
+    type: in_document
+    question: What is community rating?
+    pages: [287]
+    must_include: [community]
+
+  - id: q14
+    type: in_document
+    question: How does experience rating set a group's premium?
+    pages: [289]
+    must_include: [experience]
+
+  - id: q15
+    type: in_document
+    question: What is a HIN?
+    pages: [313]
+    must_include: [health information network]
+
+  - id: q16
+    type: in_document
+    question: Why would a health plan combine data from many sources into one database?
+    pages: [311, 312]
+    must_include: [reports]
+
+  - id: q17
+    type: in_document
+    question: What events let an employee keep group health coverage under COBRA?
+    pages: [365]
+    must_include: [termination, divorce]
+
+  - id: q18
+    type: in_document
+    question: What is the minimum medical loss ratio for large group plans under the ACA?
+    pages: [388]
+    must_include: ["85"]
+
+  - id: q19
+    type: in_document
+    question: What is Medigap for?
+    pages: [432]
+    must_include: [gaps]
+
+  - id: q20
+    type: in_document
+    question: What percentage of points leads NCQA to deny a health plan accreditation?
+    pages: [255]
+    must_include: ["55"]
+
+  # --- Healthcare, but not in the PDF ----------------------------------------------
+  - id: n01
+    type: not_in_document
+    question: What is the recommended starting dose of metformin for type 2 diabetes?
+
+  - id: n02
+    type: not_in_document
+    question: What are the symptoms of appendicitis?
+
+  - id: n03
+    type: not_in_document
+    question: How much does a knee replacement cost in Chicago?
+
+  - id: n04
+    type: not_in_document
+    question: How does the National Health Service in the United Kingdom pay its hospitals?
+
+  - id: n05
+    type: not_in_document
+    question: How long should a patient rest after cataract surgery?
+
+  # --- Off topic -------------------------------------------------------------------
+  - id: o01
+    type: off_topic
+    question: Where is the best pizza in Chicago?
+
+  - id: o02
+    type: off_topic
+    question: What is the capital of France?
+
+  - id: o03
+    type: off_topic
+    question: How do I bake sourdough bread?
+
+  - id: o04
+    type: off_topic
+    question: Who won the 2018 football World Cup?
+
+  - id: o05
+    type: off_topic
+    question: How do I sort a list in Python?

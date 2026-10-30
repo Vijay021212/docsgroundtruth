@@ -19,6 +19,7 @@ from docsgroundtruth.chat import OllamaChatModel
 from docsgroundtruth.config import Settings
 from docsgroundtruth.domain import Embedder, Reranker, SparseEncoder
 from docsgroundtruth.embedding import OllamaEmbedder
+from docsgroundtruth.evaluation import Evaluator
 from docsgroundtruth.generation import AnswerGenerator
 from docsgroundtruth.pipeline import IngestionPipeline
 from docsgroundtruth.retrieval import Retriever
@@ -103,6 +104,15 @@ def build_answer_generator(settings: Settings) -> AnswerGenerator:
         max_answer_tokens=settings.chat_max_answer_tokens,
     )
     return AnswerGenerator(chat_model=chat_model, min_relevance=settings.min_relevance)
+
+
+def build_evaluator(settings: Settings, store: QdrantStore) -> Evaluator:
+    """Create the evaluator, using the same search and answer steps as real questions."""
+    return Evaluator(
+        retriever=build_retriever(settings, store),
+        generator=build_answer_generator(settings),
+        top_k=settings.answer_chunks,
+    )
 
 
 def build_ingestion_pipeline(settings: Settings, store: QdrantStore) -> IngestionPipeline:

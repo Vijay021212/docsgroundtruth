@@ -24,6 +24,7 @@ dependencies = [
     "streamlit>=1.66.0",        # web UI for the testing playground
     "fastembed>=0.9.0",         # BM25 keyword vectors + reranker models (ONNX, CPU)
     "httpx>=0.28",              # we catch its connection error when streaming from Ollama
+    "pyyaml>=6.0",              # reads the evaluation test paper
 ]
 
 # Makes `uv run docsgroundtruth ...` call the main() function in cli.py.

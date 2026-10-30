@@ -46,6 +46,7 @@ htmlcov/
 data/raw/
 data/processed/
 data/index/
+eval/results/
 *.pdf
 *.qdrant
 

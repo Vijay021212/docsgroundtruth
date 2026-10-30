@@ -6,6 +6,7 @@ Command-line interface.
     uv run docsgroundtruth search "your question"   # show the most relevant chunks
     uv run docsgroundtruth search "..." -m hybrid   # ... using a specific search mode
     uv run docsgroundtruth stats                    # report card for the indexed chunks
+    uv run docsgroundtruth evaluate                 # run the test paper and report the scores
     uv run docsgroundtruth ui                       # open the testing playground in your browser
     uv run docsgroundtruth --help                   # list commands and options
 """
@@ -16,12 +17,20 @@ import io
 import logging
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 from docsgroundtruth.config import Settings, get_settings
 from docsgroundtruth.domain import DocsGroundTruthError, SearchHit, SearchMode
+from docsgroundtruth.evaluation import QuestionResult, load_questions
+from docsgroundtruth.evaluation_report import (
+    format_progress,
+    format_review_sheet,
+    format_summary,
+)
 from docsgroundtruth.factory import (
     build_answer_generator,
+    build_evaluator,
     build_ingestion_pipeline,
     build_retriever,
     open_store,
@@ -92,6 +101,16 @@ def _build_parser(settings: Settings) -> argparse.ArgumentParser:
 
     stats = commands.add_parser("stats", help="Show chunk counts, sizes and page coverage.")
     stats.set_defaults(handler=_run_stats)
+
+    evaluate = commands.add_parser("evaluate", help="Run a test paper and report the scores.")
+    evaluate.add_argument(
+        "questions",
+        nargs="?",  # optional: falls back to the default below
+        type=Path,
+        default=settings.eval_questions,
+        help="Test paper file (default: %(default)s).",
+    )
+    evaluate.set_defaults(handler=_run_evaluate)
 
     ui = commands.add_parser("ui", help="Open the testing playground in your browser.")
     ui.set_defaults(handler=_run_ui)
@@ -166,6 +185,26 @@ def _run_stats(args: argparse.Namespace, settings: Settings) -> None:
         print(_format_source_stats(source_stats))
     total = sum(source_stats.chunk_count for source_stats in report)
     print(f"\nTotal: {len(report)} document(s), {total} chunks")
+
+
+def _run_evaluate(args: argparse.Namespace, settings: Settings) -> None:
+    """`evaluate` command: run the test paper, print the scores, save a review sheet."""
+    questions = load_questions(args.questions)
+    print(f"Running {len(questions)} questions. This can take 10-15 minutes.\n")
+
+    def show_progress(position: int, result: QuestionResult) -> None:
+        print(f"[{position}/{len(questions)}] {format_progress(result)}", flush=True)
+
+    # The index stays open for the whole run, so the playground can't search until it ends.
+    with open_store(settings) as store:
+        report = build_evaluator(settings, store).run(questions, on_result=show_progress)
+
+    print(f"\n{format_summary(report)}")
+
+    settings.eval_results_dir.mkdir(parents=True, exist_ok=True)
+    sheet = settings.eval_results_dir / f"review_{datetime.now():%Y%m%d_%H%M}.md"
+    sheet.write_text(format_review_sheet(report), encoding="utf-8")
+    print(f"\nReview sheet saved to {sheet}")
 
 
 def _run_ui(args: argparse.Namespace, settings: Settings) -> None:
