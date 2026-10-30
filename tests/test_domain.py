@@ -2,7 +2,7 @@
 
 import uuid
 
-from docsgroundtruth.domain import Chunk
+from docsgroundtruth.domain import Chunk, SearchHit, SearchMode
 
 
 def test_chunk_id_is_deterministic_and_unique_per_position():
@@ -42,3 +42,18 @@ def test_preview_is_a_single_short_line():
     assert "\n" not in preview
     assert len(preview) <= 60
     assert preview.endswith(" ...")
+
+
+def test_ranks_label_explains_where_each_search_placed_a_hit():
+    chunk = Chunk(source="a.pdf", index=0, text="x")
+
+    hit = SearchHit(chunk=chunk, score=0.03, ranks={"vector": 3, "keyword": 1})
+
+    assert hit.ranks_label == "vector #3 · keyword #1"
+    assert SearchHit(chunk=chunk, score=0.5).ranks_label == ""
+
+
+def test_every_search_mode_has_a_label_and_a_score_name():
+    for mode in SearchMode:
+        assert mode.label
+        assert mode.score_name

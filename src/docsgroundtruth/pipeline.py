@@ -1,16 +1,18 @@
 """
-The ingestion pipeline:   file  ->  chunks  ->  vectors  ->  vector store
+The ingestion pipeline:   file  ->  chunks  ->  dense + keyword vectors  ->  vector store
 
-This module only ORCHESTRATES. It doesn't know about Docling or Ollama: it
-calls them through the `Chunker` and `Embedder` interfaces (see domain.py).
-That's what keeps each component replaceable and testable on its own.
+This module only ORCHESTRATES. It doesn't know about Docling, Ollama or
+fastembed: it calls them through the `Chunker`, `Embedder` and `SparseEncoder`
+interfaces (see domain.py). That's what keeps each component replaceable and
+testable on its own.
 """
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from docsgroundtruth.domain import Chunk, Chunker, DocsGroundTruthError, Embedder
+from docsgroundtruth.domain import Chunk, Chunker, DocsGroundTruthError, Embedder, SparseEncoder
 from docsgroundtruth.timing import Stopwatch
 from docsgroundtruth.vector_store import QdrantStore
 
@@ -29,9 +31,16 @@ class IngestReport:
 class IngestionPipeline:
     """Turns documents on disk into searchable chunks in the vector store."""
 
-    def __init__(self, chunker: Chunker, embedder: Embedder, store: QdrantStore) -> None:
+    def __init__(
+        self,
+        chunker: Chunker,
+        embedder: Embedder,
+        keyword_encoder: SparseEncoder,
+        store: QdrantStore,
+    ) -> None:
         self._chunker = chunker
         self._embedder = embedder
+        self._keyword_encoder = keyword_encoder
         self._store = store
 
     def ingest_path(self, path: Path) -> list[IngestReport]:
@@ -39,8 +48,8 @@ class IngestionPipeline:
         files = self._find_documents(path)
 
         # Prepare the collection BEFORE the slow parsing step, so a problem
-        # (Ollama not running, wrong vector size) shows up in seconds rather
-        # than after minutes of PDF processing.
+        # (Ollama not running, wrong vector size, outdated index) shows up in
+        # seconds rather than after minutes of PDF processing.
         self._store.ensure_collection(self._embedder.dimension)
 
         return [self._ingest_file(file) for file in files]
@@ -51,13 +60,18 @@ class IngestionPipeline:
             # Stages 1-2 (parse, chunk): the chunker times and logs these itself.
             chunks = self._chunker.chunk_file(path)
 
-            # Stage 3: embed.
-            vectors = self._embed(chunks)
+            # Stage 3: dense vectors (meaning), for vector search.
+            dense = self._encode(chunks, self._embedder.embed_documents, "dense vectors")
 
-            # Stage 4: store. Runs even when there are no chunks, so stale chunks
+            # Stage 4: keyword vectors (BM25 word weights), for keyword search.
+            sparse = self._encode(
+                chunks, self._keyword_encoder.encode_documents, "keyword vectors"
+            )
+
+            # Stage 5: store. Runs even when there are no chunks, so stale chunks
             # from an older version of the file are still removed.
             with Stopwatch() as watch:
-                self._store.replace_source(path.name, chunks, vectors)
+                self._store.replace_source(path.name, chunks, dense, sparse)
             logger.info("Stored %d chunks in %.1fs", len(chunks), watch.seconds)
 
         report = IngestReport(path.name, len(chunks), total.seconds)
@@ -73,13 +87,21 @@ class IngestionPipeline:
             )
         return report
 
-    def _embed(self, chunks: list[Chunk]) -> list[list[float]]:
-        """Turn the chunks' text into vectors (stage 3), logging how long it took."""
+    @staticmethod
+    def _encode[T](
+        chunks: list[Chunk], encode: Callable[[list[str]], list[T]], what: str
+    ) -> list[T]:
+        """Run one encoder over every chunk's text and log how long it took.
+
+        Used for both vector types, so the timing and logging code exists once.
+        `[T]` makes this generic: T is whatever the encoder returns per text
+        (a dense vector, or a SparseVector), and the result is a list of T.
+        """
         if not chunks:
             return []
         with Stopwatch() as watch:
-            vectors = self._embedder.embed_documents([chunk.text for chunk in chunks])
-        logger.info("Embedded %d chunks in %.1fs", len(chunks), watch.seconds)
+            vectors = encode([chunk.text for chunk in chunks])
+        logger.info("Computed %s for %d chunks in %.1fs", what, len(chunks), watch.seconds)
         return vectors
 
     def _find_documents(self, path: Path) -> list[Path]:

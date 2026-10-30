@@ -8,6 +8,8 @@ in every module that reports timings.
 from __future__ import annotations
 
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 
 
 class Stopwatch:
@@ -30,3 +32,24 @@ class Stopwatch:
     def __exit__(self, *exc_info: object) -> None:
         # Runs when the block ends, even if it ended with an error.
         self.seconds = time.perf_counter() - self._started
+
+
+class StepTimer:
+    """Times several named steps of one job and collects the results in order.
+
+        timer = StepTimer()
+        with timer.step("search"):
+            run_search()
+        timer.timings  # {"search": 0.12}
+    """
+
+    def __init__(self) -> None:
+        self.timings: dict[str, float] = {}  # step name -> seconds, in the order steps ran
+
+    @contextmanager
+    def step(self, name: str) -> Iterator[None]:
+        """Time the code inside the `with` block and record it under `name`."""
+        with Stopwatch() as watch:
+            yield
+        # Only reached when the step succeeds: a failed step isn't recorded.
+        self.timings[name] = watch.seconds

@@ -2,16 +2,20 @@
 Core domain types shared by every part of the system.
 
 This module is deliberately "pure": it has no heavy dependencies (no Docling,
-no Ollama, no Qdrant). Every other module depends on it; it depends on nothing.
+no Ollama, no Qdrant, no fastembed). Every other module depends on it; it
+depends on nothing.
 
-It contains three kinds of things:
+It contains four kinds of things:
 
-* Data types - `Chunk` and `SearchHit`, the values that flow through the system.
-* Interfaces - `Chunker` and `Embedder` describe WHAT a component does without
-  saying HOW. The pipeline is written against these interfaces, so we can swap
-  an implementation (e.g. Ollama embeddings -> another provider's embeddings) or use tiny
-  fakes in tests without changing a single line of pipeline code.
-* Errors     - `DocsGroundTruthError`, the base class for problems we expect and
+* Data types   - `Chunk`, `SparseVector` and `SearchHit`, the values that flow
+  through the system.
+* Search modes - `SearchMode`, the four ways retrieval can search.
+* Interfaces   - `Chunker`, `Embedder`, `SparseEncoder` and `Reranker` describe
+  WHAT a component does without saying HOW. The pipeline and the retriever are
+  written against these interfaces, so we can swap an implementation (e.g.
+  Ollama embeddings -> another provider's embeddings) or use tiny fakes in tests without
+  changing a single line of pipeline or retriever code.
+* Errors       - `DocsGroundTruthError`, the base class for problems we expect and
   can explain to the user (Ollama not running, nothing indexed yet, ...).
 """
 
@@ -19,7 +23,8 @@ from __future__ import annotations
 
 import textwrap
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -30,6 +35,9 @@ _CHUNK_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "docsgroundtruth/chunk")
 
 class DocsGroundTruthError(Exception):
     """An expected, user-fixable problem. The CLI shows its message without a traceback."""
+
+
+# --- Data types --------------------------------------------------------------------
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,7 +75,7 @@ class Chunk:
         return textwrap.shorten(self.text, max_chars, placeholder=" ...")
 
     def to_payload(self) -> dict[str, Any]:
-        """Convert to a plain JSON-friendly dict, stored next to the vector in the database."""
+        """Convert to a plain JSON-friendly dict, stored next to the vectors in the database."""
         return {
             "source": self.source,
             "index": self.index,
@@ -91,11 +99,79 @@ class Chunk:
 
 
 @dataclass(frozen=True, slots=True)
+class SparseVector:
+    """A mostly-empty vector, stored as only its non-empty slots.
+
+    Used for BM25 keyword search. Picture one slot for every possible word:
+    only the words that appear in a text get a weight, and all the other slots
+    are zero. Storing just the few (slot number, weight) pairs keeps it small.
+    """
+
+    indices: tuple[int, ...] = ()  # which slots are filled (each number stands for one word)
+    values: tuple[float, ...] = ()  # the weight in each of those slots, in the same order
+
+    @property
+    def is_empty(self) -> bool:
+        """True when the text had no usable words (e.g. only filler words like "what is")."""
+        return not self.indices
+
+
+@dataclass(frozen=True, slots=True)
 class SearchHit:
-    """A chunk returned by a search, with its similarity score (higher = more similar)."""
+    """A chunk returned by a search, with its score.
+
+    What the score means depends on how the search was done; see
+    `SearchMode.score_name`.
+    """
 
     chunk: Chunk
     score: float
+    # Position of the chunk in each search that found it, e.g. {"vector": 3, "keyword": 1}.
+    # Filled in by hybrid search, so interfaces can explain WHY a chunk ranked where it did.
+    ranks: dict[str, int] = field(default_factory=dict)
+
+    @property
+    def ranks_label(self) -> str:
+        """Where each search placed the chunk, e.g. "vector #3 · keyword #1" ("" if unknown)."""
+        return " · ".join(f"{name} #{position}" for name, position in self.ranks.items())
+
+
+# --- Search modes --------------------------------------------------------------------
+
+
+class SearchMode(StrEnum):
+    """The four ways retrieval can search. Each one builds on the one before it.
+
+    A StrEnum member behaves like its string value, so settings and command-line
+    options can simply say "hybrid".
+    """
+
+    VECTOR = "vector"  # meaning only (the Phase 2 behaviour)
+    KEYWORD = "keyword"  # exact words only (BM25)
+    HYBRID = "hybrid"  # both searches, merged with Reciprocal Rank Fusion
+    RERANK = "rerank"  # hybrid, then a reranker re-checks the best candidates
+
+    @property
+    def label(self) -> str:
+        """Name shown in interfaces, e.g. "Hybrid + reranker"."""
+        return _MODE_DESCRIPTIONS[self][0]
+
+    @property
+    def score_name(self) -> str:
+        """What a result's score means in this mode, e.g. "relevance"."""
+        return _MODE_DESCRIPTIONS[self][1]
+
+
+_MODE_DESCRIPTIONS: dict[SearchMode, tuple[str, str]] = {
+    # mode: (label shown in interfaces, what the score means)
+    SearchMode.VECTOR: ("Vector (meaning)", "similarity"),
+    SearchMode.KEYWORD: ("Keyword (BM25)", "BM25 score"),
+    SearchMode.HYBRID: ("Hybrid (vector + keyword)", "fusion points"),
+    SearchMode.RERANK: ("Hybrid + reranker", "relevance"),
+}
+
+
+# --- Interfaces ----------------------------------------------------------------------
 
 
 class Chunker(Protocol):
@@ -114,7 +190,7 @@ class Chunker(Protocol):
 
 
 class Embedder(Protocol):
-    """Turns text into vectors.
+    """Turns text into dense vectors that capture its meaning.
 
     Documents and queries have separate methods because some models
     (like nomic-embed-text) encode them slightly differently.
@@ -131,4 +207,24 @@ class Embedder(Protocol):
 
     def embed_query(self, text: str) -> list[float]:
         """Embed a single search question."""
+        ...
+
+
+class SparseEncoder(Protocol):
+    """Turns text into sparse keyword vectors (BM25 word weights)."""
+
+    def encode_documents(self, texts: list[str]) -> list[SparseVector]:
+        """Encode many chunks; returns one sparse vector per text, in the same order."""
+        ...
+
+    def encode_query(self, text: str) -> SparseVector:
+        """Encode a single search question."""
+        ...
+
+
+class Reranker(Protocol):
+    """Judges how well each text answers a question, by reading the two together."""
+
+    def score(self, question: str, texts: list[str]) -> list[float]:
+        """Relevance of each text, from 0 (unrelated) to 1 (answers it), in the same order."""
         ...

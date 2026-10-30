@@ -3,6 +3,7 @@ Command-line interface.
 
     uv run docsgroundtruth ingest [PATH]            # index a file or folder (default: data/raw)
     uv run docsgroundtruth search "your question"   # show the most relevant chunks
+    uv run docsgroundtruth search "..." -m hybrid   # ... using a specific search mode
     uv run docsgroundtruth stats                    # report card for the indexed chunks
     uv run docsgroundtruth ui                       # open the testing playground in your browser
     uv run docsgroundtruth --help                   # list commands and options
@@ -17,7 +18,7 @@ import sys
 from pathlib import Path
 
 from docsgroundtruth.config import Settings, get_settings
-from docsgroundtruth.domain import DocsGroundTruthError, SearchHit
+from docsgroundtruth.domain import DocsGroundTruthError, SearchHit, SearchMode
 from docsgroundtruth.factory import build_ingestion_pipeline, build_retriever, open_store
 from docsgroundtruth.stats import SizeBucket, SourceStats, summarize
 from docsgroundtruth.ui import PLAYGROUND_SCRIPT
@@ -69,6 +70,14 @@ def _build_parser(settings: Settings) -> argparse.ArgumentParser:
     search.add_argument(
         "-k", "--top-k", type=int, default=5, help="How many results to show (default: 5)."
     )
+    search.add_argument(
+        "-m",
+        "--mode",
+        type=SearchMode,  # turns the typed text, e.g. "hybrid", into a SearchMode
+        choices=list(SearchMode),
+        default=settings.search_mode,
+        help="How to search (default: %(default)s).",
+    )
     search.set_defaults(handler=_run_search)
 
     stats = commands.add_parser("stats", help="Show chunk counts, sizes and page coverage.")
@@ -96,15 +105,17 @@ def _run_ingest(args: argparse.Namespace, settings: Settings) -> None:
 
 
 def _run_search(args: argparse.Namespace, settings: Settings) -> None:
-    """`search` command: retrieve the chunks closest to the question and print them."""
+    """`search` command: retrieve the chunks most relevant to the question and print them."""
     with open_store(settings) as store:
-        result = build_retriever(settings, store).retrieve(args.query, top_k=args.top_k)
+        retriever = build_retriever(settings, store)
+        result = retriever.retrieve(args.query, top_k=args.top_k, mode=args.mode)
 
+    print(f"Search mode: {result.mode.label}")
     if not result.hits:
         print("No results.")
         return
     for rank, hit in enumerate(result.hits, start=1):
-        print(_format_hit(rank, hit))
+        print(_format_hit(rank, hit, result.mode))
     print(f"\n{result.summary}")
 
 
@@ -129,6 +140,9 @@ def _run_ui(args: argparse.Namespace, settings: Settings) -> None:
     command = [
         # The current Python (sys.executable) guarantees the project's .venv is used.
         sys.executable, "-m", "streamlit", "run", str(PLAYGROUND_SCRIPT),
+        # Only accept connections from this computer. The page has no login, so
+        # without this anyone on the same network could read the indexed documents.
+        "--server.address=localhost",
         # Skip Streamlit's first-run question asking for your email address.
         "--server.showEmailPrompt=false",
         # Don't send usage statistics to Streamlit: this is a private, local tool.
@@ -143,13 +157,15 @@ def _run_ui(args: argparse.Namespace, settings: Settings) -> None:
 # --- Output formatting -----------------------------------------------------------
 
 
-def _format_hit(rank: int, hit: SearchHit) -> str:
+def _format_hit(rank: int, hit: SearchHit, mode: SearchMode) -> str:
     """Render one search result as a short, readable block of text."""
     chunk = hit.chunk
-    return (
-        f"\n#{rank}  score={hit.score:.3f}  {chunk.source}  (p. {chunk.pages_label})\n"
-        f"    {chunk.preview()}"
+    header = (
+        f"#{rank}  {mode.score_name}={hit.score:.3f}  {chunk.source}  (p. {chunk.pages_label})"
     )
+    if hit.ranks:  # hybrid modes: show where each search had placed this chunk
+        header += f"  [{hit.ranks_label}]"
+    return f"\n{header}\n    {chunk.preview()}"
 
 
 def _format_source_stats(stats: SourceStats) -> str:

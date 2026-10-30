@@ -2,20 +2,42 @@
 Composition root: the ONE place that picks concrete classes and wires them together.
 
 Every other module receives its collaborators ready-made. If we ever swap
-Ollama for another provider, this file is where that decision changes.
-The CLI and the playground use these builders today, and the web API
+Ollama or fastembed for another provider, this file is where that decision
+changes. The CLI and the playground use these builders today, and the web API
 (Phase 6) will reuse them, so the wiring is never duplicated.
+
+Docling and fastembed are imported inside the builders that need them, not at
+the top of this file: they take seconds to import, and commands like `stats`
+never use them.
 """
 
+from __future__ import annotations
+
+from dataclasses import dataclass
+
 from docsgroundtruth.config import Settings
+from docsgroundtruth.domain import Embedder, Reranker, SparseEncoder
 from docsgroundtruth.embedding import OllamaEmbedder
 from docsgroundtruth.pipeline import IngestionPipeline
 from docsgroundtruth.retrieval import Retriever
 from docsgroundtruth.vector_store import QdrantStore
 
 
+@dataclass(frozen=True, slots=True)
+class SearchModels:
+    """The models a Retriever needs.
+
+    Building them takes a moment (loading files, checking downloads), so a
+    long-running interface like the playground builds them once and reuses them.
+    """
+
+    embedder: Embedder
+    keyword_encoder: SparseEncoder
+    reranker: Reranker
+
+
 def build_embedder(settings: Settings) -> OllamaEmbedder:
-    """Create the embedder described by the settings."""
+    """Create the embedder (meaning vectors) described by the settings."""
     return OllamaEmbedder(
         host=settings.ollama_host,
         model=settings.embed_model,
@@ -25,20 +47,53 @@ def build_embedder(settings: Settings) -> OllamaEmbedder:
     )
 
 
+def build_keyword_encoder(settings: Settings) -> SparseEncoder:
+    """Create the BM25 keyword encoder."""
+    from docsgroundtruth.bm25 import Bm25Encoder
+
+    return Bm25Encoder(cache_dir=settings.model_cache_dir, avg_len=settings.bm25_avg_len)
+
+
+def build_reranker(settings: Settings) -> Reranker:
+    """Create the reranker. Its model is downloaded the first time."""
+    from docsgroundtruth.reranking import FastEmbedReranker
+
+    return FastEmbedReranker(model=settings.rerank_model, cache_dir=settings.model_cache_dir)
+
+
+def build_search_models(settings: Settings) -> SearchModels:
+    """Create every model retrieval needs."""
+    return SearchModels(
+        embedder=build_embedder(settings),
+        keyword_encoder=build_keyword_encoder(settings),
+        reranker=build_reranker(settings),
+    )
+
+
 def open_store(settings: Settings) -> QdrantStore:
     """Open the vector store. Use it in a `with` block so it's always closed."""
     return QdrantStore.open_local(settings.qdrant_path, settings.collection_name)
 
 
-def build_retriever(settings: Settings, store: QdrantStore) -> Retriever:
-    """Create the retriever on top of an already-open store."""
-    return Retriever(embedder=build_embedder(settings), store=store)
+def build_retriever(
+    settings: Settings, store: QdrantStore, models: SearchModels | None = None
+) -> Retriever:
+    """Create the retriever on top of an already-open store.
+
+    Pass `models` to reuse models built earlier; otherwise they're built here.
+    """
+    models = models or build_search_models(settings)
+    return Retriever(
+        embedder=models.embedder,
+        keyword_encoder=models.keyword_encoder,
+        reranker=models.reranker,
+        store=store,
+        candidates=settings.retrieval_candidates,
+    )
 
 
 def build_ingestion_pipeline(settings: Settings, store: QdrantStore) -> IngestionPipeline:
     """Create the full ingestion pipeline on top of an already-open store."""
-    # Imported here rather than at the top of the file: Docling takes several
-    # seconds to import, and commands like `search` never need it.
     from docsgroundtruth.chunking import DoclingChunker
 
     chunker = DoclingChunker(
@@ -46,4 +101,9 @@ def build_ingestion_pipeline(settings: Settings, store: QdrantStore) -> Ingestio
         max_tokens=settings.chunk_max_tokens,
         enable_ocr=settings.enable_ocr,
     )
-    return IngestionPipeline(chunker=chunker, embedder=build_embedder(settings), store=store)
+    return IngestionPipeline(
+        chunker=chunker,
+        embedder=build_embedder(settings),
+        keyword_encoder=build_keyword_encoder(settings),
+        store=store,
+    )

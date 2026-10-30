@@ -22,6 +22,7 @@ dependencies = [
     "fastapi>=0.143",           # web API (Phase 6)
     "uvicorn>=0.54",            # server that runs the FastAPI app (Phase 6)
     "streamlit>=1.66.0",        # web UI for the testing playground
+    "fastembed>=0.9.0",         # BM25 keyword vectors + reranker models (ONNX, CPU)
 ]
 
 # Makes `uv run docsgroundtruth ...` call the main() function in cli.py.

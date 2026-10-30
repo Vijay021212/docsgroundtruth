@@ -3,24 +3,29 @@ Testing playground: a web page for asking questions and inspecting what retrieva
 
 Start it with:   uv run docsgroundtruth ui
 
+Pick one of the four search modes (vector, keyword, hybrid, hybrid + reranker),
+or turn on "Compare" to see all four side by side for the same question.
+
 How Streamlit runs this file: it executes the WHOLE script, top to bottom,
-every time you interact with the page. Two consequences shape this code:
+every time you interact with the page. That shapes the code:
 
 * The question box sits inside a form, so typing doesn't trigger a run;
   only pressing "Search" does.
+* The search models (embedder, BM25 encoder, reranker) are built once per
+  session and cached, so they aren't reloaded for every search.
 * The index summary in the sidebar is cached for a short time, so it isn't
   re-read from disk on every run.
 
-The index is opened only at the moment it's needed and closed right after.
-Qdrant's local mode allows one program at a time, so this keeps the index
-free for `docsgroundtruth ingest` while the page is open.
+The index itself is opened only while searching and closed right after. Qdrant's
+local mode allows one program at a time, so this keeps the index free for
+`docsgroundtruth ingest` while the page is open.
 """
 
 import streamlit as st
 
 from docsgroundtruth.config import get_settings
-from docsgroundtruth.domain import DocsGroundTruthError, SearchHit
-from docsgroundtruth.factory import build_retriever, open_store
+from docsgroundtruth.domain import DocsGroundTruthError, SearchHit, SearchMode
+from docsgroundtruth.factory import SearchModels, build_retriever, build_search_models, open_store
 from docsgroundtruth.retrieval import RetrievalResult
 from docsgroundtruth.stats import SourceStats, summarize
 
@@ -28,10 +33,13 @@ from docsgroundtruth.stats import SourceStats, summarize
 _SUMMARY_CACHE_SECONDS = 30
 # Upper limit for the "number of results" slider.
 _MAX_RESULTS = 20
+# Preview length in the Compare view, where four columns share the page width.
+_COMPACT_PREVIEW_CHARS = 120
 
 
 def main() -> None:
     """Draw the whole page. Streamlit calls this on every run (see module docstring)."""
+    settings = get_settings()
     st.set_page_config(page_title="DocsGroundTruth", page_icon="🔎", layout="wide")
     st.title("DocsGroundTruth playground")
     st.caption("Ask a question and inspect which chunks retrieval finds, and how well they score.")
@@ -40,12 +48,24 @@ def main() -> None:
 
     # Widgets inside a form don't trigger a run until the submit button is pressed.
     with st.form("search"):
-        question = st.text_input("Question", placeholder="e.g. What is utilization review?")
+        question = st.text_input("Question", placeholder="e.g. What is a HIN?")
+        modes = list(SearchMode)
+        mode = st.radio(
+            "Search mode",
+            options=modes,
+            index=modes.index(settings.search_mode),
+            format_func=lambda option: option.label,  # show "Hybrid + reranker", not "rerank"
+            horizontal=True,
+        )
         top_k = st.slider("Number of results", min_value=1, max_value=_MAX_RESULTS, value=5)
+        compare = st.toggle("Compare all four modes side by side (ignores the mode above)")
         submitted = st.form_submit_button("Search", type="primary")
 
     if submitted:
-        _search_and_render(question, top_k)
+        if compare:
+            _compare_and_render(question, top_k)
+        else:
+            _search_and_render(question, top_k, mode)
 
 
 # --- Sidebar ---------------------------------------------------------------------
@@ -67,8 +87,10 @@ def _render_sidebar() -> None:
                 st.caption(f"{stats.source}: {stats.chunk_count:,} chunks")
 
         st.subheader("Models")
-        st.caption(f"Embeddings: {settings.embed_model}")
-        st.caption("Search: vector similarity (cosine)")
+        st.caption(f"Meaning (embeddings): {settings.embed_model}")
+        st.caption("Keywords: BM25")
+        st.caption(f"Reranker: {settings.rerank_model}")
+        st.caption(f"Candidates per search: {settings.retrieval_candidates}")
 
 
 @st.cache_data(ttl=_SUMMARY_CACHE_SECONDS, show_spinner=False)
@@ -78,43 +100,79 @@ def _load_index_summary() -> list[SourceStats]:
         return summarize(store.iter_chunks())
 
 
-# --- Search results ----------------------------------------------------------------
+@st.cache_resource(show_spinner="Loading search models (first time only)...")
+def _search_models() -> SearchModels:
+    """Build the search models once per playground session; every search reuses them."""
+    return build_search_models(get_settings())
 
 
-def _search_and_render(question: str, top_k: int) -> None:
-    """Run retrieval for `question` and show the results, or a clear error."""
+# --- Searching -----------------------------------------------------------------------
+
+
+def _search_and_render(question: str, top_k: int, mode: SearchMode) -> None:
+    """Search with one mode and show its results."""
+    results = _run_searches(question, top_k, [mode])
+    if results:
+        _render_results(results[0])
+
+
+def _compare_and_render(question: str, top_k: int) -> None:
+    """Search with all four modes and show the results in four columns."""
+    results = _run_searches(question, top_k, list(SearchMode))
+    if not results:
+        return
+    for column, result in zip(st.columns(len(results)), results, strict=True):
+        with column:
+            st.subheader(result.mode.label)
+            _render_results(result, compact=True)
+
+
+def _run_searches(question: str, top_k: int, modes: list[SearchMode]) -> list[RetrievalResult]:
+    """Run retrieval once per mode, with the index open only while searching.
+
+    Problems (empty question, nothing indexed, index busy, Ollama down) are
+    shown on the page, and an empty list is returned.
+    """
     settings = get_settings()
     try:
         with st.spinner("Searching..."), open_store(settings) as store:
-            result = build_retriever(settings, store).retrieve(question, top_k=top_k)
+            retriever = build_retriever(settings, store, _search_models())
+            return [retriever.retrieve(question, top_k=top_k, mode=mode) for mode in modes]
     except DocsGroundTruthError as error:
         st.error(str(error))
-        return
-    _render_results(result)
+        return []
 
 
-def _render_results(result: RetrievalResult) -> None:
+# --- Results ---------------------------------------------------------------------------
+
+
+def _render_results(result: RetrievalResult, compact: bool = False) -> None:
     """Show the timing summary, then one card per result."""
     if not result.hits:
-        st.warning("No results: the index is empty.")
+        # e.g. keyword search when the question has only filler words
+        st.warning("No results.")
         return
     st.caption(result.summary)
     for rank, hit in enumerate(result.hits, start=1):
-        _render_hit(rank, hit)
+        _render_hit(rank, hit, result.mode, compact)
 
 
-def _render_hit(rank: int, hit: SearchHit) -> None:
-    """One result card: rank, score, source and pages, a preview, and the full chunk on demand."""
+def _render_hit(rank: int, hit: SearchHit, mode: SearchMode, compact: bool) -> None:
+    """One result card: rank, score, pages, where each search placed it, and the text."""
     chunk = hit.chunk
     with st.container(border=True):
+        # The file name is left out in the narrow Compare columns.
+        source = "" if compact else f" · {chunk.source}"
         st.markdown(
-            f"**#{rank}** · score **{hit.score:.3f}** · {chunk.source} · p. {chunk.pages_label}"
+            f"**#{rank}** · {mode.score_name} **{hit.score:.3f}** · p. {chunk.pages_label}{source}"
         )
+        if hit.ranks:  # hybrid modes: e.g. "vector #3 · keyword #1"
+            st.caption(f"Found by: {hit.ranks_label}")
         if chunk.headings:
             st.caption(" › ".join(chunk.headings))  # the section path, e.g. Chapter › Section
         # st.text shows text exactly as written. st.markdown would treat characters
         # like * or $ in the document as formatting.
-        st.text(chunk.preview())
+        st.text(chunk.preview(_COMPACT_PREVIEW_CHARS) if compact else chunk.preview())
         with st.expander("Show full chunk"):
             st.text(chunk.text)
             st.caption(f"{chunk.token_count} tokens · chunk #{chunk.index} of this document")

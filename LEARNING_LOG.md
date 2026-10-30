@@ -274,10 +274,87 @@ UI   ──┘                  (Phase 6: the FastAPI service joins here too)
 
 ---
 
+## Phase 3: Retrieval quality (hybrid search + reranker)
+
+**Goal:** find better chunks by combining two kinds of search, then re-checking the best candidates.
+
+### What we built
+
+```
+                 ┌─► vector search  (meaning)      → top 30 ─┐
+ question ───────┤                                            ├─► fusion → top 30 ─► reranker → best 5
+                 └─► keyword search (exact words)  → top 30 ─┘
+```
+
+- `bm25.py`: turns text into BM25 keyword vectors, using fastembed.
+- `reranking.py`: runs the reranker model and converts its scores to 0–1.
+- `retrieval.py`: four search modes (vector, keyword, hybrid, hybrid + reranker) and our own RRF function.
+- `vector_store.py`: each chunk now stores its text and two vectors, and there are two search methods.
+- Playground: a search mode choice and a Compare view showing all four modes side by side.
+- 41 tests, using fakes for the keyword encoder and the reranker.
+
+### Key concepts
+
+1. **BM25** is a scoring formula, not a library or an AI model. "BM" means Best Matching, and 25
+   is the version of the formula. Rare words count more, repeated mentions have diminishing
+   returns, and long chunks are adjusted for length.
+2. **Sparse vector:** one slot per possible word, almost all empty, so only the filled slots are stored.
+   fastembed computes each chunk's word weights, and Qdrant adds the rarity weights (`Modifier.IDF`).
+3. **Hybrid search** uses both methods because they fail differently: vector search handles
+   different wording, and BM25 handles exact terms.
+4. **Reciprocal Rank Fusion (RRF)** merges ranked lists using positions, not scores, because
+   the scores are on different scales. Each list gives a chunk `1 / (60 + position)` points.
+5. **Reranker (cross-encoder):** reads the question and one chunk together and judges how well
+   the chunk answers it. It's more accurate but slower, so it only checks the top 30 candidates.
+6. **Model engines:** Ollama runs GGUF models, PyTorch runs Docling's models, and ONNX Runtime
+   runs the reranker on the CPU.
+7. **Schema change:** adding a second vector changed the index format, so the index had to be
+   deleted and rebuilt. An old index now gets a clear message explaining this.
+
+### Results on our PDF
+
+Top score per method:
+
+| Question | Vector | Keyword | Hybrid | Reranker |
+|---|---|---|---|---|
+| "What is a HIN?" | 0.694 | 9.6 | 0.033 | 0.999 |
+| "Why would a health plan combine data from many sources into one database?" | 0.782 | 28.3 | 0.032 | 0.995 |
+| "best pizza in Chicago" (not in the PDF) | 0.457 | 6.1 | 0.032 | 0.000 |
+
+Scores from different methods are on different scales, so compare them only within a column.
+Reranking added about 1.3 s per question on the CPU.
+
+### Lessons
+
+- **Hybrid + reranker worked best** on these three questions, so it stays the default. This is a
+  first check, not proof; Phase 5 measures it with many more questions.
+- **Only the reranker clearly showed that nothing relevant was found** (pizza scored 0.000).
+  That could power "this isn't in the documents" in Phase 4, after testing what cut-off works best.
+- **The reranker can rescue a good chunk:** "High Volume of Data" was keyword #19 and hybrid #5,
+  and the reranker moved it to #2.
+- **Hybrid removed keyword search's noise:** off-topic chunks such as Unbundling and XML dropped
+  out of the top 5.
+- **Test predictions, don't assume them:** we expected vector search to struggle with the acronym
+  "HIN", but it did fine, probably because the PDF uses the term so often.
+- **Similar results can score alike:** all five "HIN" results scored 0.947–0.999, because all are about HINs.
+
+### Problems & fixes
+
+| Problem | Cause | Fix |
+|---|---|---|
+| The playground was reachable from other computers on the network | Streamlit listens on all network addresses by default, and the page has no login | Added `--server.address=localhost` to the `ui` command |
+| fastembed's default model folder could be emptied | It defaults to the system temp folder | Set a permanent folder: `.cache/fastembed` in the home folder |
+
+### Ideas for later
+
+- Check whether the retrieved "HIN" chunks actually define the term (the previews were cut off).
+- Measure the real average chunk length for BM25 (`DGT_BM25_AVG_LEN`, currently fastembed's default of 256).
+- Compare a bigger reranker model, such as `BAAI/bge-reranker-base`, in Phase 5.
+
+---
+
 ## Next phases
 
-- **Phase 3, retrieval quality:** hybrid search (BM25 keywords + vectors) and a reranker, with
-  a side-by-side comparison in the playground.
 - **Phase 4, generation:** answers from the chat model, with citations and "not in the documents",
   shown in the playground.
 - **Phase 5, evaluation:** test questions with known answers; measure retrieval and answer
