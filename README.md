@@ -81,7 +81,7 @@ The test papers are small (47 questions on the course PDF and 17 on the booklet)
 You need [uv](https://docs.astral.sh/uv/) and [Ollama](https://ollama.com). The commands below use Windows PowerShell.
 
 ```powershell
-git clone https://github.com/<your-github-username>/docsgroundtruth.git
+git clone https://github.com/Vijay021212/docsgroundtruth.git
 cd docsgroundtruth
 uv sync
 ollama pull nomic-embed-text

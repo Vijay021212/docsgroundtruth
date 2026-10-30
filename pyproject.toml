@@ -32,7 +32,7 @@ dependencies = [
 docsgroundtruth = "docsgroundtruth.cli:main"
 
 [project.urls]
-Repository = "https://github.com/<your-github-username>/docsgroundtruth"
+Repository = "https://github.com/Vijay021212/docsgroundtruth"
 
 # Development-only tools. `uv sync` installs this group automatically;
 # people who just install the package don't get them.
