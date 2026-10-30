@@ -58,6 +58,14 @@ def test_vector_mode_finds_the_closest_meaning(retriever, index_chunks, make_chu
     assert result.summary.startswith("2 results in ")
 
 
+def test_summary_says_result_for_a_single_hit(retriever, index_chunks, make_chunks):
+    index_chunks(make_chunks("a.pdf", ["claims processing", "member eligibility"]))
+
+    result = retriever.retrieve("claims processing", top_k=1, mode=SearchMode.VECTOR)
+
+    assert result.summary.startswith("1 result in ")
+
+
 def test_keyword_mode_matches_exact_words(retriever, index_chunks, make_chunks):
     chunks = make_chunks("a.pdf", ["the HIN links providers", "data warehouse", "claims paid"])
     index_chunks(chunks)

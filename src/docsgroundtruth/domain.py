@@ -10,11 +10,10 @@ It contains four kinds of things:
 * Data types   - `Chunk`, `SparseVector` and `SearchHit`, the values that flow
   through the system.
 * Search modes - `SearchMode`, the four ways retrieval can search.
-* Interfaces   - `Chunker`, `Embedder`, `SparseEncoder` and `Reranker` describe
-  WHAT a component does without saying HOW. The pipeline and the retriever are
+* Interfaces   - `Chunker`, `Embedder`, `SparseEncoder`, `Reranker` and `ChatModel`
+  describe WHAT a component does without saying HOW. The rest of the code is
   written against these interfaces, so we can swap an implementation (e.g.
-  Ollama embeddings -> another provider's embeddings) or use tiny fakes in tests without
-  changing a single line of pipeline or retriever code.
+  Ollama -> another provider) or use tiny fakes in tests without changing it.
 * Errors       - `DocsGroundTruthError`, the base class for problems we expect and
   can explain to the user (Ollama not running, nothing indexed yet, ...).
 """
@@ -23,6 +22,7 @@ from __future__ import annotations
 
 import textwrap
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
@@ -227,4 +227,12 @@ class Reranker(Protocol):
 
     def score(self, question: str, texts: list[str]) -> list[float]:
         """Relevance of each text, from 0 (unrelated) to 1 (answers it), in the same order."""
+        ...
+
+
+class ChatModel(Protocol):
+    """Writes text in reply to instructions and a message."""
+
+    def stream(self, system: str, user: str) -> Iterator[str]:
+        """Yield the reply piece by piece. `system` holds the rules, `user` the message."""
         ...

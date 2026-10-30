@@ -353,10 +353,76 @@ Reranking added about 1.3 s per question on the CPU.
 
 ---
 
+## Phase 4: Generation (answers with citations)
+
+**Goal:** have the chat model read the best chunks and write an answer with page sources.
+
+### What we built
+
+```
+question → retriever (hybrid + reranker) → best 5 chunks → chat model → answer with [1] citations
+```
+
+- `generation.py`: builds the prompt, gets the answer, and checks its citations.
+- `chat.py`: connects to the local chat model in Ollama and streams the answer word by word.
+- `ollama_errors.py`: one place for clear messages when Ollama is down or a model is missing.
+- `docsgroundtruth ask "question"`: a new command for getting answers in the terminal.
+- Playground: a **Get answer** button, with the answer above its source cards.
+- 57 tests, using a fake chat model.
+
+### Key concepts
+
+1. **The three rules:** answer only from the sources, cite them, and admit when the answer isn't there.
+2. **Prompt:** the instructions (system message) plus the numbered sources and the question
+   (user message). The prompt also tells the model to ignore instructions found inside documents.
+3. **Two-level refusal:** if the reranker scores every chunk below `min_relevance`, we refuse
+   without calling the model. Otherwise the model is told to reply with a fixed sentence.
+4. **Citation check:** the code confirms that each cited number matches a source that was sent.
+   It can't confirm that the source really says what the sentence claims.
+5. **Context size (`num_ctx`):** Ollama silently cuts off anything over the limit, so we set it
+   to 8192 tokens, enough for 5 chunks, the instructions and the answer.
+6. **Temperature 0:** the model picks the most likely next word, for factual, more repeatable answers.
+7. **Streaming:** words appear as they're written, so a slow CPU answer doesn't look frozen.
+
+### Results on our PDF
+
+| Question | Result | Writing time |
+|---|---|---|
+| "What is a HIN?" | Answer citing p. 315 (not yet checked against the PDF) | 17.4 s |
+| "Why would a health plan combine data from many sources into one database?" | Answer citing pp. 311–312; a person compared it with the source and it matched | 19.4 s |
+| "best pizza in Chicago" | "The documents don't contain an answer to this question." The model never ran. | 0.0 s |
+
+Finding the chunks added 3–4 s per question, about 2 s of it embedding the question.
+
+### Lessons
+
+- **The model can use too little of what it's given:** it had 5 chunks but cited only one, and
+  left out useful points. The answer was correct, but incomplete.
+- **It cites less often than asked:** one `[1]` at the end of a paragraph instead of one per claim.
+- **A valid citation isn't proof of a correct answer:** a person still had to compare the answer
+  with the source. Phase 5 measures this across many questions.
+- **PDF parsing can break sentences:** one sentence in the chunk on pp. 311–312 splits across two bullets.
+- **Read the library's code:** when streaming, the Ollama library lets `httpx.ConnectError`
+  through, unlike normal requests, so we handle both.
+
+### Problems & fixes
+
+| Problem | Cause | Fix |
+|---|---|---|
+| `uv run` failed with "failed to remove file ... docsgroundtruth.exe" | The playground was still running, and Windows can't replace a running program's file | Stop the playground before running `uv` |
+| The playground got stuck on "Stopping..." | Not investigated | Close the terminal; force-stop the process if needed |
+| The page said "1 results" | The word was fixed in the text | Choose "result" or "results" based on the count |
+
+### Ideas for later
+
+- Improve answers that use only one source and cite too rarely, then measure the effect.
+- Test a question on a healthcare topic the PDF doesn't cover, where the reranker may not score
+  near 0 and the model itself has to refuse.
+
+---
+
 ## Next phases
 
-- **Phase 4, generation:** answers from the chat model, with citations and "not in the documents",
-  shown in the playground.
 - **Phase 5, evaluation:** test questions with known answers; measure retrieval and answer
   quality; save parsed documents first, then tune chunking.
 - **Phase 6, production hardening:** FastAPI service, Qdrant server mode, GitHub Actions

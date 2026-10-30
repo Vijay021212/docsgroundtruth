@@ -2,6 +2,7 @@
 Command-line interface.
 
     uv run docsgroundtruth ingest [PATH]            # index a file or folder (default: data/raw)
+    uv run docsgroundtruth ask "your question"      # get a written answer with page sources
     uv run docsgroundtruth search "your question"   # show the most relevant chunks
     uv run docsgroundtruth search "..." -m hybrid   # ... using a specific search mode
     uv run docsgroundtruth stats                    # report card for the indexed chunks
@@ -19,7 +20,12 @@ from pathlib import Path
 
 from docsgroundtruth.config import Settings, get_settings
 from docsgroundtruth.domain import DocsGroundTruthError, SearchHit, SearchMode
-from docsgroundtruth.factory import build_ingestion_pipeline, build_retriever, open_store
+from docsgroundtruth.factory import (
+    build_answer_generator,
+    build_ingestion_pipeline,
+    build_retriever,
+    open_store,
+)
 from docsgroundtruth.stats import SizeBucket, SourceStats, summarize
 from docsgroundtruth.ui import PLAYGROUND_SCRIPT
 
@@ -65,6 +71,10 @@ def _build_parser(settings: Settings) -> argparse.ArgumentParser:
     )
     ingest.set_defaults(handler=_run_ingest)
 
+    ask = commands.add_parser("ask", help="Get a written answer with page sources.")
+    ask.add_argument("question", help="The question to answer, in quotes.")
+    ask.set_defaults(handler=_run_ask)
+
     search = commands.add_parser("search", help="Show the chunks most relevant to a question.")
     search.add_argument("query", help="The question to search for, in quotes.")
     search.add_argument(
@@ -102,6 +112,29 @@ def _run_ingest(args: argparse.Namespace, settings: Settings) -> None:
     for report in reports:
         print(f"  {report.source}: {report.chunk_count} chunks in {report.seconds:.1f}s")
     print(f"The index now holds {total} chunks.")
+
+
+def _run_ask(args: argparse.Namespace, settings: Settings) -> None:
+    """`ask` command: retrieve the best chunks, then print the answer as it's written."""
+    with open_store(settings) as store:
+        retrieval = build_retriever(settings, store).retrieve(
+            args.question, top_k=settings.answer_chunks, mode=SearchMode.RERANK
+        )
+    # The index is closed by now, so the slow writing step doesn't keep it locked.
+
+    print("Answer:\n")
+    answer = build_answer_generator(settings).answer(
+        retrieval, on_token=lambda token: print(token, end="", flush=True)
+    )
+    print()
+
+    for warning in answer.warnings:
+        print(f"\nWarning: {warning}")
+    if answer.citations:
+        print("\nSources:")
+        for citation in answer.citations:
+            print(f"  {citation.label}")
+    print(f"\n{retrieval.summary}\nAnswer written in {answer.seconds:.1f}s")
 
 
 def _run_search(args: argparse.Namespace, settings: Settings) -> None:

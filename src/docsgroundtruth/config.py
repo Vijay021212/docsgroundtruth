@@ -84,6 +84,23 @@ class Settings(BaseSettings):
     # which Windows disk clean-up can empty (forcing re-downloads), so we use a permanent one.
     model_cache_dir: Path = Path.home() / ".cache" / "fastembed"
 
+    # --- Generation ------------------------------------------------------------------
+    # How many of the best chunks the chat model reads for each answer.
+    answer_chunks: int = 5
+
+    # How many tokens the chat model can see at once. Ollama silently cuts off anything
+    # beyond this. 5 chunks of about 800 tokens + instructions + answer fit within 8192,
+    # so raise this if you raise answer_chunks.
+    chat_context_tokens: int = 8192
+
+    # Upper limit on the length of an answer, in tokens.
+    chat_max_answer_tokens: int = 512
+
+    # If the best chunk's reranker score is below this, say the documents don't contain
+    # the answer, without calling the model. Set low on purpose: in our first test, the
+    # off-topic question scored 0.000 and real ones above 0.9. Phase 5 tests it properly.
+    min_relevance: float = 0.01
+
     # --- Storage -------------------------------------------------------------------
     raw_data_dir: Path = Path("data/raw")
     qdrant_path: Path = Path("data/index")

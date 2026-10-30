@@ -15,9 +15,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from docsgroundtruth.chat import OllamaChatModel
 from docsgroundtruth.config import Settings
 from docsgroundtruth.domain import Embedder, Reranker, SparseEncoder
 from docsgroundtruth.embedding import OllamaEmbedder
+from docsgroundtruth.generation import AnswerGenerator
 from docsgroundtruth.pipeline import IngestionPipeline
 from docsgroundtruth.retrieval import Retriever
 from docsgroundtruth.vector_store import QdrantStore
@@ -90,6 +92,17 @@ def build_retriever(
         store=store,
         candidates=settings.retrieval_candidates,
     )
+
+
+def build_answer_generator(settings: Settings) -> AnswerGenerator:
+    """Create the generator that writes answers with the local chat model."""
+    chat_model = OllamaChatModel(
+        host=settings.ollama_host,
+        model=settings.chat_model,
+        context_tokens=settings.chat_context_tokens,
+        max_answer_tokens=settings.chat_max_answer_tokens,
+    )
+    return AnswerGenerator(chat_model=chat_model, min_relevance=settings.min_relevance)
 
 
 def build_ingestion_pipeline(settings: Settings, store: QdrantStore) -> IngestionPipeline:

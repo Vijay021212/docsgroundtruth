@@ -55,7 +55,8 @@ class RetrievalResult:
     def summary(self) -> str:
         """One line for any interface, e.g. "5 results in 0.35s (question embedding 0.30s, ...)"."""
         steps = ", ".join(f"{name} {seconds:.2f}s" for name, seconds in self.timings.items())
-        return f"{len(self.hits)} results in {self.total_seconds:.2f}s ({steps})"
+        noun = "result" if len(self.hits) == 1 else "results"
+        return f"{len(self.hits)} {noun} in {self.total_seconds:.2f}s ({steps})"
 
 
 def reciprocal_rank_fusion(

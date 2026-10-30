@@ -3,14 +3,15 @@ Testing playground: a web page for asking questions and inspecting what retrieva
 
 Start it with:   uv run docsgroundtruth ui
 
-Pick one of the four search modes (vector, keyword, hybrid, hybrid + reranker),
-or turn on "Compare" to see all four side by side for the same question.
+"Get answer" writes an answer with page sources. "Search only" shows the chunks
+instead: pick one of the four search modes (vector, keyword, hybrid, hybrid +
+reranker), or turn on "Compare" to see all four side by side.
 
 How Streamlit runs this file: it executes the WHOLE script, top to bottom,
 every time you interact with the page. That shapes the code:
 
 * The question box sits inside a form, so typing doesn't trigger a run;
-  only pressing "Search" does.
+  only pressing one of its buttons does.
 * The search models (embedder, BM25 encoder, reranker) are built once per
   session and cached, so they aren't reloaded for every search.
 * The index summary in the sidebar is cached for a short time, so it isn't
@@ -25,7 +26,13 @@ import streamlit as st
 
 from docsgroundtruth.config import get_settings
 from docsgroundtruth.domain import DocsGroundTruthError, SearchHit, SearchMode
-from docsgroundtruth.factory import SearchModels, build_retriever, build_search_models, open_store
+from docsgroundtruth.factory import (
+    SearchModels,
+    build_answer_generator,
+    build_retriever,
+    build_search_models,
+    open_store,
+)
 from docsgroundtruth.retrieval import RetrievalResult
 from docsgroundtruth.stats import SourceStats, summarize
 
@@ -42,13 +49,17 @@ def main() -> None:
     settings = get_settings()
     st.set_page_config(page_title="DocsGroundTruth", page_icon="🔎", layout="wide")
     st.title("DocsGroundTruth playground")
-    st.caption("Ask a question and inspect which chunks retrieval finds, and how well they score.")
+    st.caption("Ask a question, then get an answer with sources or inspect the chunks found.")
 
     _render_sidebar()
 
     # Widgets inside a form don't trigger a run until the submit button is pressed.
     with st.form("search"):
         question = st.text_input("Question", placeholder="e.g. What is a HIN?")
+        ask = st.form_submit_button("Get answer", type="primary")
+
+        st.divider()
+        st.caption("These settings are for Search only.")
         modes = list(SearchMode)
         mode = st.radio(
             "Search mode",
@@ -59,13 +70,14 @@ def main() -> None:
         )
         top_k = st.slider("Number of results", min_value=1, max_value=_MAX_RESULTS, value=5)
         compare = st.toggle("Compare all four modes side by side (ignores the mode above)")
-        submitted = st.form_submit_button("Search", type="primary")
+        search = st.form_submit_button("Search only")
 
-    if submitted:
-        if compare:
-            _compare_and_render(question, top_k)
-        else:
-            _search_and_render(question, top_k, mode)
+    if ask:
+        _answer_and_render(question)
+    elif search and compare:
+        _compare_and_render(question, top_k)
+    elif search:
+        _search_and_render(question, top_k, mode)
 
 
 # --- Sidebar ---------------------------------------------------------------------
@@ -91,6 +103,7 @@ def _render_sidebar() -> None:
         st.caption("Keywords: BM25")
         st.caption(f"Reranker: {settings.rerank_model}")
         st.caption(f"Candidates per search: {settings.retrieval_candidates}")
+        st.caption(f"Answers: {settings.chat_model}")
 
 
 @st.cache_data(ttl=_SUMMARY_CACHE_SECONDS, show_spinner=False)
@@ -104,6 +117,43 @@ def _load_index_summary() -> list[SourceStats]:
 def _search_models() -> SearchModels:
     """Build the search models once per playground session; every search reuses them."""
     return build_search_models(get_settings())
+
+
+# --- Answering -----------------------------------------------------------------------
+
+
+def _answer_and_render(question: str) -> None:
+    """Find the best chunks, then show the answer word by word, with warnings and sources."""
+    settings = get_settings()
+    results = _run_searches(question, settings.answer_chunks, [SearchMode.RERANK])
+    if not results:
+        return
+    retrieval = results[0]
+
+    st.subheader("Answer")
+    placeholder = st.empty()  # a spot on the page we can keep rewriting as words arrive
+    written = ""
+
+    def show_token(token: str) -> None:
+        nonlocal written
+        written += token
+        placeholder.text(written)  # st.text, so characters like * and $ show as written
+
+    try:
+        with st.spinner("Writing the answer (this can take a little while on a CPU)..."):
+            answer = build_answer_generator(settings).answer(retrieval, on_token=show_token)
+    except DocsGroundTruthError as error:
+        st.error(str(error))
+        return
+
+    for warning in answer.warnings:
+        st.warning(warning)
+    st.caption(f"{retrieval.summary}. Answer written in {answer.seconds:.1f}s.")
+
+    if answer.citations:
+        st.subheader("Sources")
+        for citation in answer.citations:
+            _render_hit(citation.number, citation.hit, retrieval.mode, compact=False)
 
 
 # --- Searching -----------------------------------------------------------------------

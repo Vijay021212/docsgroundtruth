@@ -11,7 +11,7 @@ from itertools import batched
 
 import ollama
 
-from docsgroundtruth.domain import DocsGroundTruthError
+from docsgroundtruth.ollama_errors import explain_ollama_errors
 
 logger = logging.getLogger(__name__)
 
@@ -68,18 +68,6 @@ class OllamaEmbedder:
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
         """The only method that talks to Ollama, so all error handling lives in one place."""
-        try:
+        with explain_ollama_errors(self._host, self._model):
             response = self._client.embed(model=self._model, input=texts)
-        except ConnectionError as error:
-            raise DocsGroundTruthError(
-                f"Cannot reach Ollama at {self._host}. Is it running? "
-                "(Check for the llama icon in the system tray, or run `ollama list`.)"
-            ) from error
-        except ollama.ResponseError as error:
-            if error.status_code == 404:
-                raise DocsGroundTruthError(
-                    f"Embedding model '{self._model}' is not downloaded. "
-                    f"Run: ollama pull {self._model}"
-                ) from error
-            raise
         return [list(vector) for vector in response.embeddings]
