@@ -563,9 +563,27 @@ The playground can get stuck on "Stopping..." after Ctrl+C. Not investigated. Cl
 
 ---
 
+## After the push: architecture diagrams
+
+The project was pushed to https://github.com/Vijay021212/docsgroundtruth. The README's text-character
+diagram was then replaced with two Mermaid diagrams:
+
+1. **The pipeline:** how a PDF becomes indexed chunks, and how a question becomes a cited answer,
+   including the two ways it can refuse.
+2. **How the code fits together:** entry points, `factory.py`, the core logic, the interfaces in
+   `domain.py`, and the tool wrappers and test fakes that implement them.
+
+### Key concepts
+
+1. **Mermaid:** a diagram written as text inside Markdown. GitHub draws it as a picture, and because
+   it's text it lives in git and changes with a small edit, unlike a PNG that silently goes out of date.
+2. **A diagram must match the code:** it uses the real class and file names, and it shows the one
+   exception honestly (the core uses `QdrantStore` directly, not through an interface).
+
+---
+
 ## Next phases
 
-- **Push to GitHub:** the last step, once the user gives the go.
 - **Later, if wanted:** Qdrant server mode, a bigger chat model, and a demo GIF for the README.
 
 ## References

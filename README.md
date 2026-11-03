@@ -18,19 +18,38 @@ Sources:
 
 ## How it works
 
-```
-INGEST   PDF ─► Docling (layout, tables, OCR) ─► chunks ─┬─► dense vectors (meaning)
-                                                         └─► BM25 sparse vectors (keywords)
-                                                                     │
-                                                              Qdrant (embedded)
-                                                                     │
-ASK      question ─► vector search ─┐                                │
-                                    ├─► fusion (RRF) ─► reranker ─► best 5 chunks
-                 ─► keyword search ─┘                                │
-                                                                     ▼
-                                     local chat model ─► answer with [1] citations
-                                                                     │
-                                                       code checks each citation
+### The pipeline
+
+Documents are read and indexed once. Every question then goes through two searches, a reranker and the chat model.
+
+```mermaid
+flowchart TB
+    subgraph ingest ["Ingest: once per document"]
+        pdf[/"PDF"/] --> docling["Docling<br/>reads layout, tables and text in images"]
+        docling --> chunks["Chunks of up to 400 tokens,<br/>with headings and page numbers"]
+        chunks --> dense["Dense vectors: meaning<br/>nomic-embed-text"]
+        chunks --> sparse["BM25 sparse vectors: keywords<br/>fastembed"]
+    end
+
+    dense --> qdrant[("Qdrant<br/>local mode")]
+    sparse --> qdrant
+
+    subgraph ask ["Ask: every question"]
+        question[/"Question"/] --> vsearch["Vector search<br/>top 30"]
+        question --> ksearch["Keyword search<br/>top 30"]
+        vsearch --> rrf["Fusion: RRF<br/>merges both lists"]
+        ksearch --> rrf
+        rrf --> rerank["Reranker re-reads each candidate<br/>ms-marco-MiniLM"]
+        rerank --> gate{"Best chunk relevant<br/>enough?"}
+        gate -- "no" --> refuse[/"Not in the documents"/]
+        gate -- "yes" --> llm["qwen3:4b-instruct writes<br/>from the best 5 chunks"]
+        llm -- "says the answer isn't there" --> refuse
+        llm --> check["Code checks each citation<br/>against the chunks sent"]
+        check --> answer[/"Answer with [1] citations"/]
+    end
+
+    qdrant --> vsearch
+    qdrant --> ksearch
 ```
 
 | Layer | Tool | Why |
@@ -40,6 +59,56 @@ ASK      question ─► vector search ─┐                                │
 | Vector and keyword search | [Qdrant](https://qdrant.tech) local mode, BM25 through [fastembed](https://github.com/qdrant/fastembed) | One database with no server to run |
 | Reranking | `ms-marco-MiniLM-L-6-v2` (ONNX, CPU) | Ranks hard questions much better, and makes many off-topic questions easy to refuse |
 | Interfaces | CLI, [Streamlit](https://streamlit.io) playground, [FastAPI](https://fastapi.tiangolo.com) | All three call the same core code |
+
+### How the code fits together
+
+The core logic uses the models only through small interfaces, so it never knows which tool is behind them. `factory.py` is the one place that picks the real tools and connects them, and the tests plug in fakes instead. The database is the exception: the core uses `QdrantStore` directly, and the tests run it in memory.
+
+```mermaid
+flowchart TB
+    subgraph entry ["Entry points"]
+        cli["cli.py"]
+        ui["ui/playground.py"]
+        api["api.py"]
+    end
+
+    factory["factory.py<br/>builds and connects every part"]
+
+    subgraph core ["Core logic"]
+        pipeline["IngestionPipeline<br/>pipeline.py"]
+        retriever["Retriever<br/>retrieval.py"]
+        generator["AnswerGenerator<br/>generation.py"]
+        evaluator["Evaluator<br/>evaluation.py"]
+    end
+
+    subgraph ports ["Interfaces in domain.py"]
+        Chunker
+        Embedder
+        SparseEncoder
+        Reranker
+        ChatModel
+    end
+
+    subgraph tools ["One wrapper per tool"]
+        DoclingChunker
+        OllamaEmbedder
+        Bm25Encoder
+        FastEmbedReranker
+        OllamaChatModel
+    end
+
+    store[("QdrantStore<br/>vector_store.py")]
+    fakes["Fakes in tests/"]
+
+    entry --> factory
+    factory -- "creates" --> core
+    evaluator --> retriever
+    evaluator --> generator
+    core -- "uses" --> ports
+    core --> store
+    tools -.->|implement| ports
+    fakes -.->|implement| ports
+```
 
 **Design choices**
 - **Answers are tied to their sources.** The model is told to use only the retrieved chunks, and the code checks every citation against what was actually sent.
